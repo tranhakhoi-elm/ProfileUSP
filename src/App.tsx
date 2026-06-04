@@ -103,6 +103,80 @@ export default function App() {
     }
   };
 
+  const runAutoDetection = (fileName: string, parsedText: string, sheets?: ParsedSheet[]) => {
+    // If user has already entered a custom product name, don't overwrite
+    const currentNameClean = productName ? productName.trim() : "";
+    if (currentNameClean && currentNameClean !== "" && currentNameClean !== "N/A") {
+      return;
+    }
+
+    let detected = "";
+
+    const cleanName = (val: string) => {
+      return val
+        .replace(/[:"'\-\s]+$/, "")
+        .replace(/^[:"'\-\s]+/, "")
+        .trim();
+    };
+
+    // Heuristics 1: Parse string lines for keys like Tên sản phẩm, Sản phẩm, Tên dự án, vv...
+    const lines = parsedText.split("\n");
+    const labelRegex = /(?:Tên sản phẩm|Sản phẩm|Tên dự án|Product Name|Product|Dự án)\s*[:=]\s*([^\n\r]+)/i;
+    for (const line of lines) {
+      const match = line.match(labelRegex);
+      if (match && match[1]) {
+        detected = cleanName(match[1]);
+        if (detected && detected.length > 1) {
+          break;
+        }
+      }
+    }
+
+    // Heuristics 2: If Excel sheets exist, look at top cells
+    if (!detected && sheets && sheets.length > 0) {
+      for (const sheet of sheets) {
+        const rows = sheet.rows.slice(0, 15);
+        for (const row of rows) {
+          for (let i = 0; i < row.length; i++) {
+            const cellVal = row[i]?.trim();
+            if (cellVal && /^(?:Tên sản phẩm|Sản phẩm|Tên dự án|Product Name|Product|Dự án)$/i.test(cellVal.replace(/[:=]$/, "").trim())) {
+              if (row[i + 1]) {
+                detected = cleanName(row[i + 1]);
+                break;
+              }
+            }
+          }
+          if (detected) break;
+        }
+        if (detected) break;
+      }
+    }
+
+    // Heuristics 3: Extract from file name and clean up meta tags
+    if (!detected) {
+      let nameNoExt = fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
+      nameNoExt = nameNoExt
+        .replace(/^(?:Thong_tin_san_pham|thong_tin_san_pham|master_file|Master_File|data|report|tailieu|tai_lieu|thongtin|thong_tin|product|project|du_an|duan)[_\-\s]*/i, "")
+        .replace(/[_\-]+/g, " ")
+        .trim();
+      
+      // Convert CamelCase to spaced
+      nameNoExt = nameNoExt.replace(/([a-z])([A-Z])/g, "$1 $2");
+      if (nameNoExt && nameNoExt.length > 2) {
+        detected = nameNoExt;
+      }
+    }
+
+    if (detected) {
+      // Title Case capitalizing
+      const prettyName = detected
+        .split(" ")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+      setProductName(prettyName);
+    }
+  };
+
   const handleProductFile = (file: File) => {
     // Skip hidden system files e.g. ._ or ~$ temp files
     if (file.name.startsWith("._") || file.name === ".DS_Store" || file.name.startsWith("~$")) {
@@ -181,6 +255,9 @@ export default function App() {
             setProductDescription((prev) =>
               prev ? `${prev}\n\n${text}` : text
             );
+            setTimeout(() => {
+              runAutoDetection(file.name, text, sheetsData);
+            }, 100);
           } catch (err: any) {
             setError(`Không thể phân tách dữ liệu Excel: ${err?.message || err}`);
           }
@@ -204,11 +281,12 @@ export default function App() {
                 : []
             );
 
+            const newSheet: ParsedSheet = {
+              name: sheetName,
+              rows: stringRows,
+            };
+
             if (stringRows.length > 0) {
-              const newSheet: ParsedSheet = {
-                name: sheetName,
-                rows: stringRows,
-              };
               setParsedSheets((prev) => [...prev, newSheet]);
               setActiveDescriptionTab("table");
               setActiveParsedSheetIndex(parsedSheets.length);
@@ -217,6 +295,9 @@ export default function App() {
             setProductDescription((prev) =>
               prev ? `${prev}\n\n[Thông tin từ file CSV ${file.name}]:\n${text}` : text
             );
+            setTimeout(() => {
+              runAutoDetection(file.name, text, [newSheet]);
+            }, 100);
           } catch (err: any) {
             setError(`Không thể phân tách dữ liệu CSV: ${err?.message || err}`);
           }
@@ -230,6 +311,9 @@ export default function App() {
           setProductDescription((prev) =>
             prev ? `${prev}\n\n[Thông tin từ file ${file.name}]:\n${text}` : text
           );
+          setTimeout(() => {
+            runAutoDetection(file.name, text);
+          }, 100);
         }
       };
       reader.readAsText(file);
@@ -527,34 +611,96 @@ export default function App() {
   const handleDownloadCSV = () => {
     const chosenPersona = editedPersona || (selectedPersonaIndex !== null ? personas[selectedPersonaIndex] : null);
 
-    // Helper to escape CSV values safely
-    const esc = (text: any) => {
-      const stringified = text === undefined || text === null ? "" : String(text);
-      return `"${stringified.replace(/"/g, '""')}"`;
-    };
+    // Create a new workbook
+    const wb = XLSX.utils.book_new();
 
-    let csvContent = "\uFEFF"; // Byte Order Mark for Excel UTF-8 representation
-    
-    // Add Metadata header first
-    csvContent += `BẢN PHÊ DUYỆT FILE MASTER ĐỊNH VỊ THƯƠNG HIỆU v2.0 - SẢN PHẨM: ${productName.toUpperCase()}\n`;
-    csvContent += `Chân dung mục tiêu: ${chosenPersona?.name || ""}\n`;
-    csvContent += `Mô tả sản phẩm: ${productDescription.replace(/\n/g, " ")}\n\n`;
+    // Sheet 1: THUONG HEU & USP CAP (General Overview)
+    const sheet1Data: any[][] = [
+      ["BẢN PHÊ DUYỆT FILE MASTER ĐỊNH VỊ THƯƠNG HIỆU & HỆ THỐNG USP CỐT LÕI (AI POWER) "],
+      [`Xuất bản ngày: ${new Date().toLocaleDateString("vi-VN")} lúc ${new Date().toLocaleTimeString("vi-VN")}`],
+      [],
+      ["I. THÔNG TIN SẢN PHẨM & DỰ ÁN"],
+      ["Tên sản phẩm:", productName],
+      ["Mô tả kỹ thuật & Giải pháp cốt lõi:", productDescription],
+      [],
+      ["II. TIÊU ĐIỂM CHÂN DUNG KHÁCH HÀNG MỤC TIÊU (SELECTED PERSONA)"],
+      ["Danh xưng nhóm khách hàng lý tưởng:", chosenPersona?.name || "N/A"],
+      ["Giải mã Nhân khẩu học & Hành vi:", chosenPersona?.demographics || "N/A"],
+      ["Nỗi bức xúc cốt lõi / Nỗi đau sâu thẳm:", chosenPersona?.painPoints || "N/A"],
+      ["Xúc cảm, lợi ích mong muốn vượt bực:", chosenPersona?.benefits || "N/A"],
+      ["Tâm niệm thầm kín tự quy định:", chosenPersona?.summary || "N/A"],
+      [],
+      ["III. 5 CẶP GIẢI PHÁP & USP ĐÃ LỰA CHỌN TRONG CHIẾN DỊCH"],
+      ["STT", "Nỗi lo lắng / Nỗi đau khách hàng", "Định vị / Giải pháp USP tương đương", "Chi tiết chuyển đổi / Kịch bản thông điệp"]
+    ];
 
-    // Row table header matching the exact columns requested by user
-    csvContent += "STT,Bước (Step),Mục Tiêu Tâm Lý,Nỗi Đau & Mong Muốn,Các bước,USP (Lợi ích khách hàng -> Thông số kỹ thuật),Headline - Subheadline (Text hiển thị trên ảnh),Minh họa hình ảnh (Visual Key)\n";
-
-    reportRows.forEach((row) => {
-      csvContent += `${row.stt},${esc(row.step)},${esc(row.psychologicalGoal)},${esc(row.painPointAndDesire)},${esc(row.stepsDetail)},${esc(row.uspDetail)},${esc(row.headlineSubheadline)},${esc(row.visualKey)}\n`;
+    const chosenUsps = getSelectedUspObjects();
+    chosenUsps.forEach((item, idx) => {
+      sheet1Data.push([
+        (idx + 1).toString(),
+        item.painPoint || "",
+        item.usp || "",
+        item.description || ""
+      ]);
     });
 
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `Master_File_USP_8_Cot_${productName.replace(/[^a-zA-Z0-9]/g, "_") || "san_pham"}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const ws1 = XLSX.utils.aoa_to_sheet(sheet1Data);
+    ws1["!cols"] = [
+      { wch: 30 }, // Cột tiêu đề danh mục
+      { wch: 45 }, // Cột nội dung chính 1
+      { wch: 45 }, // Cột nội dung chính 2
+      { wch: 55 }  // Cột nội dung chính 3
+    ];
+
+    // Sheet 2: MA TRAN MARKETING 8 COT (8-Column Matrix Table)
+    const sheet2Data: any[][] = [
+      ["ĐẠI MA TRẬN MARKETING 8 BƯỚC CHI TIẾT - PHÂN TÍCH TÂM LÝ & BÀN GIAO TRUYỀN THÔNG"],
+      [`Chiến dịch sản phẩm: ${productName}`],
+      [],
+      [
+        "STT",
+        "Bước (Step)",
+        "Mục Tiêu Tâm Lý Cốt Lõi",
+        "Nỗi Đau & Kỳ Vọng Chi Phối",
+        "Các Bước Triển Khai Thực Tế (Kịch Bản)",
+        "USP Vượt Trội (Lợi ích khách hàng -> Thông Số Kỹ Thuật)",
+        "Tiêu Đề & Tiêu Đề Phụ Truyền Thông (Headline/Subheadline)",
+        "Ý Tưởng Hình Ảnh & Bối Cảnh Hiển Thị (Visual Key)"
+      ]
+    ];
+
+    reportRows.forEach((row) => {
+      sheet2Data.push([
+        row.stt ? row.stt.toString() : "",
+        row.step || "",
+        row.psychologicalGoal || "",
+        row.painPointAndDesire || "",
+        row.stepsDetail || "",
+        row.uspDetail || "",
+        row.headlineSubheadline || "",
+        row.visualKey || ""
+      ]);
+    });
+
+    const ws2 = XLSX.utils.aoa_to_sheet(sheet2Data);
+    ws2["!cols"] = [
+      { wch: 6 },   // STT
+      { wch: 22 },  // Bước (Step)
+      { wch: 30 },  // Mục Tiêu Tâm Lý
+      { wch: 40 },  // Nỗi Đau & Mong Muốn
+      { wch: 40 },  // Các bước
+      { wch: 45 },  // USP
+      { wch: 45 },  // Headline
+      { wch: 40 }   // Visual Key
+    ];
+
+    // Append sheets to workbook
+    XLSX.utils.book_append_sheet(wb, ws1, "1. Tong quan & USP");
+    XLSX.utils.book_append_sheet(wb, ws2, "2. Ma tran 8 Cot Chien dich");
+
+    // Write file directly with native .xlsx suffix
+    const fileBaseName = productName.replace(/[^a-zA-Z0-9]/g, "_") || "san_pham";
+    XLSX.writeFile(wb, `Master_File_USP_Strategic_Report_${fileBaseName}.xlsx`);
   };
 
   const generateNotebookLMPrompt = () => {
@@ -638,11 +784,6 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-4">
-          <div className="flex items-center gap-2 px-2.5 py-1.5 bg-slate-100 rounded-full text-[10px] sm:text-xs font-semibold text-slate-600 border border-slate-200">
-            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-            <span>Trạng thái: Đang thực hiện</span>
-          </div>
-
           {currentStep > 1 && (
             <button
               id="btn-reset"
@@ -826,314 +967,261 @@ export default function App() {
           )}
 
           <AnimatePresence mode="wait">
-            {/* Step 1 Page Content layout */}
             {currentStep === 1 && (
-            <motion.div
-              key="step-1"
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              transition={{ duration: 0.2 }}
-              className="max-w-4xl mx-auto"
-            >
-              {/* Main Core Form Inputs block */}
-              <div className="bg-white p-5 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-                <div>
-                  <span className="text-xs font-bold text-blue-600 uppercase tracking-widest block mb-1">
-                    Thiết lập ban đầu
-                  </span>
-                  <h2 className="text-2xl font-black text-slate-900 tracking-tight font-sans">
-                    Nhập Thông Tin Sản Phẩm & Ý Tưởng
-                  </h2>
-                  <p className="text-slate-500 text-xs sm:text-sm font-medium">
-                    Khai báo chi tiết để AI phân loại tệp khách hàng tiềm năng cốt lõi.
-                  </p>
-                </div>
+              <motion.div
+                key="step-1"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.2 }}
+                className="max-w-4xl mx-auto"
+              >
+                {/* Main Core Form Inputs block */}
+                <div className="bg-white p-5 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+                  <div>
+                    <span className="text-xs font-bold text-blue-600 uppercase tracking-widest block mb-1">
+                      Thiết lập ban đầu
+                    </span>
+                    <h2 className="text-2xl font-black text-slate-900 tracking-tight font-sans">
+                      Nhập Thông Tin Sản Phẩm & Ý Tưởng
+                    </h2>
+                    <p className="text-slate-500 text-xs sm:text-sm font-medium">
+                      Khai báo chi tiết để AI phân loại tệp khách hàng tiềm năng cốt lõi.
+                    </p>
+                  </div>
 
-                <div className="space-y-4">
+                  <div className="space-y-4">
+                  {/* Integrated Drag and drop styled like reference (NOW PLACED TRULY FIRST ON TOP!) */}
+                  <div
+                    onDragEnter={handleDrag}
+                    onDragOver={handleDrag}
+                    onDragLeave={handleDrag}
+                    onDrop={handleDropText}
+                    className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
+                      dragActive
+                        ? "bg-blue-50/50 border-blue-600"
+                        : "bg-slate-50 hover:bg-slate-100/40 border-slate-200"
+                    }`}
+                  >
+                    <input
+                      type="file"
+                      id="file-txt-upload"
+                      accept=".txt,.md,.json,.csv,.xlsx,.xls"
+                      onChange={handleFileInputChange}
+                      className="hidden"
+                    />
+                    <label htmlFor="file-txt-upload" className="cursor-pointer space-y-2 block">
+                      <div className="mx-auto w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shadow-xxs">
+                        <UploadCloud className="w-5 h-5 animate-pulse" />
+                      </div>
+                      <div className="text-xs sm:text-sm text-slate-700">
+                        <span className="font-bold text-blue-600 hover:underline">Nhấp chọn tài liệu</span> hoặc kéo thả file dữ liệu vào đây (.xlsx, .xls, .csv, .txt)
+                      </div>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-widest font-mono">
+                        Hỗ trợ Excel, CSV và tệp văn bản thô
+                      </p>
+                    </label>
+
+                    {uploadedFileName && (
+                      <div className="mt-3 inline-flex items-center space-x-1.5 bg-blue-50 border border-blue-200 text-blue-800 px-3.5 py-1 rounded-full text-xs font-semibold">
+                        <FileText className="w-3.5 h-3.5 text-blue-600" />
+                        <span className="font-semibold truncate max-w-xs">{uploadedFileName}</span>
+                      </div>
+                    )}
+                  </div>
+
                   <div>
                     <label id="lbl-prod-name" className="block text-xs font-black uppercase tracking-wider text-slate-700 mb-1.5 font-sans">
                       Tên sản phẩm thiết bị / Dịch vụ *
                     </label>
-                      <input
-                        id="input-prod-name"
-                        type="text"
-                        value={productName}
-                        onChange={(e) => setProductName(e.target.value)}
-                        placeholder="Ví dụ: Máy lọc không khí PureFlow 3000, Khóa học AI Copywriting đỉnh cao..."
-                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 text-sm text-slate-800 placeholder-slate-400 font-medium transition duration-150"
-                      />
-                    </div>
+                    <input
+                      id="input-prod-name"
+                      type="text"
+                      value={productName}
+                      onChange={(e) => setProductName(e.target.value)}
+                      placeholder="Ví dụ: Máy lọc không khí PureFlow 3000, Khóa học AI Copywriting đỉnh cao..."
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 text-sm text-slate-800 placeholder-slate-400 font-medium transition duration-150"
+                    />
+                  </div>
 
-                    <div>
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2 pb-1 border-b border-slate-100 font-sans">
-                        <label id="lbl-prod-desc" className="block text-xs font-black uppercase tracking-wider text-slate-700">
-                          Mô tả kỹ thuật & Giải pháp sản phẩm mang lại *
-                        </label>
-                        
-                        <div className="flex bg-slate-100 p-0.5 rounded-lg text-[11px] font-bold">
-                          <button
-                            type="button"
-                            onClick={() => setActiveDescriptionTab("text")}
-                            className={`px-3 py-1.5 rounded-md transition-all flex items-center gap-1 cursor-pointer ${
-                              activeDescriptionTab === "text"
-                                ? "bg-white text-blue-700 shadow-xs"
-                                : "text-slate-500 hover:text-slate-700"
-                            }`}
-                          >
-                            <FileText className="w-3.5 h-3.5 text-blue-500" />
-                            <span>Văn bản / CSV gốc</span>
-                          </button>
-                          
-                          <button
-                            type="button"
-                            onClick={() => setActiveDescriptionTab("table")}
-                            className={`px-3 py-1.5 rounded-md transition-all flex items-center gap-1 cursor-pointer relative ${
-                              activeDescriptionTab === "table"
-                                        ? "bg-white text-blue-700 shadow-xs"
-                                        : "text-slate-500 hover:text-emerald-700"
-                            }`}
-                          >
-                            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
-                            <span>Xem dạng Bảng ({parsedSheets.length})</span>
-                            {parsedSheets.length > 0 && (
-                              <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-
-                      {activeDescriptionTab === "text" ? (
-                        <div className="space-y-1">
-                          <textarea
-                            id="input-prod-desc"
-                            rows={6}
-                            value={productDescription}
-                            onChange={(e) => setProductDescription(e.target.value)}
-                            placeholder="Mô tả kỹ lưỡng công dụng lý tính, quy cách bảo hành, tính năng nổi bặt vượt trội hơn đối thủ, hoặc phản hồi tích cực từng người dùng trước đó để AI chiết tách chuẩn phong vị nhất định..."
-                            className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 text-sm text-slate-800 placeholder-slate-400 font-sans leading-relaxed transition duration-150"
-                          />
-                          <div className="text-right text-[10px] text-slate-400 font-medium">
-                            {productDescription.length} ký tự
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="border border-slate-200 rounded-xl p-4 space-y-4 bg-slate-50/50">
-                          {parsedSheets.length === 0 ? (
-                            <div className="text-center py-8 text-slate-400 text-xs font-semibold flex flex-col items-center justify-center gap-2">
-                              <FileSpreadsheet className="w-8 h-8 text-slate-300 animate-bounce" />
-                              <p>Chưa nạp hoặc chưa nhận diện tệp dữ liệu bảng.</p>
-                              <p className="text-[10px] text-slate-400 font-normal max-w-sm mx-auto leading-relaxed">
-                                Vui lòng tải lên tệp Excel (.xlsx, .xls) hoặc CSV để hệ thống hiển thị bảng tương tác tại đây.
-                              </p>
-                            </div>
-                          ) : (
-                            <div className="space-y-3">
-                              {/* Tab buttons for multiple parsed sheets */}
-                              <div className="flex flex-wrap gap-1.5 pb-2 border-b border-slate-200">
-                                {parsedSheets.map((sheet, idx) => (
-                                  <button
-                                    key={idx}
-                                    type="button"
-                                    onClick={() => setActiveParsedSheetIndex(idx)}
-                                    className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all cursor-pointer ${
-                                      activeParsedSheetIndex === idx
-                                        ? "bg-slate-900 text-white"
-                                        : "bg-white text-slate-600 hover:bg-slate-200/60 border border-slate-200"
-                                    }`}
-                                  >
-                                    📁 {sheet.name}
-                                  </button>
-                                ))}
-                              </div>
-
-                              {/* Search cell values tool box */}
-                              <div className="flex gap-2">
-                                <input
-                                  type="text"
-                                  placeholder="🔍 Lọc nhanh dòng dữ liệu trong sheet..."
-                                  value={tableSearchQuery}
-                                  onChange={(e) => setTableSearchQuery(e.target.value)}
-                                  className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                />
-                                {tableSearchQuery && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setTableSearchQuery("")}
-                                    className="px-2.5 bg-slate-200 text-slate-600 hover:bg-slate-300 text-xs font-bold rounded-lg transition cursor-pointer"
-                                  >
-                                    Xóa
-                                  </button>
-                                )}
-                              </div>
-
-                              {/* The Spreadsheet Table Component */}
-                              {parsedSheets[activeParsedSheetIndex] && (
-                                <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white max-h-[250px] overflow-y-auto custom-scrollbar shadow-xxs">
-                                  <table className="min-w-full divide-y divide-slate-200 text-left border-collapse table-auto select-none font-sans">
-                                    <tbody className="divide-y divide-slate-200 divide-x divide-slate-100">
-                                      {parsedSheets[activeParsedSheetIndex].rows
-                                        .filter((row) => {
-                                          if (!tableSearchQuery.trim()) return true;
-                                          return row.some((cell) =>
-                                            cell.toLowerCase().includes(tableSearchQuery.toLowerCase())
-                                          );
-                                        })
-                                        .map((row, rIdx) => (
-                                          <tr
-                                            key={rIdx}
-                                            className={`${
-                                              rIdx === 0
-                                                ? "bg-slate-50 font-black text-slate-700 sticky top-0 uppercase text-[9px] tracking-wider"
-                                                : "text-slate-600 hover:bg-slate-100/30 text-[11px] even:bg-slate-50/20"
-                                            }`}
-                                          >
-                                            {row.map((cell, cIdx) => (
-                                              <td
-                                                key={cIdx}
-                                                className="px-3 py-1.5 border-r border-slate-100 truncate max-w-[180px] font-medium leading-normal"
-                                                title={cell}
-                                              >
-                                                {cell}
-                                              </td>
-                                            ))}
-                                          </tr>
-                                        ))}
-                                    </tbody>
-                                  </table>
-                                </div>
-                              )}
-                              
-                              <p className="text-[10px] text-slate-400 italic">
-                                * Đang hiển thị sheet: <strong>{parsedSheets[activeParsedSheetIndex]?.name}</strong> (Mở tab đầu để sửa văn bản nếu cần).
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Integrated Drag and drop styled like reference */}
-                    <div
-                      onDragEnter={handleDrag}
-                      onDragOver={handleDrag}
-                      onDragLeave={handleDrag}
-                      onDrop={handleDropText}
-                      className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
-                        dragActive
-                          ? "bg-blue-50/50 border-blue-600"
-                          : "bg-slate-50 hover:bg-slate-100/40 border-slate-200"
-                      }`}
-                    >
-                      <input
-                        type="file"
-                        id="file-txt-upload"
-                        accept=".txt,.md,.json,.csv,.xlsx,.xls"
-                        onChange={handleFileInputChange}
-                        className="hidden"
-                      />
-                      <label htmlFor="file-txt-upload" className="cursor-pointer space-y-2 block">
-                        <div className="mx-auto w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shadow-xxs">
-                          <UploadCloud className="w-5 h-5 animate-pulse" />
-                        </div>
-                        <div className="text-xs sm:text-sm text-slate-700">
-                          <span className="font-bold text-blue-600 hover:underline">Nhấp chọn tài liệu</span> hoặc kéo thả file dữ liệu vào đây (.xlsx, .xls, .csv, .txt)
-                        </div>
-                        <p className="text-[10px] text-slate-400 uppercase tracking-widest font-mono">
-                          Hỗ trợ Excel, CSV và tệp văn bản thô
-                        </p>
+                  <div>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2 pb-1 border-b border-slate-100 font-sans">
+                      <label id="lbl-prod-desc" className="block text-xs font-black uppercase tracking-wider text-slate-700">
+                        Mô tả kỹ thuật & Giải pháp sản phẩm mang lại *
                       </label>
-
-                      {uploadedFileName && (
-                        <div className="mt-3 inline-flex items-center space-x-1.5 bg-blue-50 border border-blue-200 text-blue-800 px-3.5 py-1 rounded-full text-xs font-semibold">
-                          <FileText className="w-3.5 h-3.5 text-blue-600" />
-                          <span className="font-semibold truncate max-w-xs">{uploadedFileName}</span>
-                        </div>
-                      )}
                     </div>
 
-                    {/* Image Demo Illustration Module with exact reference design buttons */}
-                    <div className="bg-slate-50 p-4 sm:p-5 rounded-xl border border-slate-200 space-y-3.5">
+                    <div className="space-y-4">
                       <div className="space-y-1">
-                        <label className="block text-xs font-black uppercase tracking-wider text-slate-700">
-                          Minh họa sản xuất ảnh 3D tối giản (Tùy chọn)
-                        </label>
-                        <p className="text-slate-500 text-[11px] leading-normal font-medium">
-                          Bổ sung một tấm ảnh thực tế từ thiết bị của bạn hoặc cho phép Gemini tự động phác học phối cảnh 3D minh họa phục vụ quảng bá.
-                        </p>
+                        <textarea
+                          id="input-prod-desc"
+                          rows={6}
+                          value={productDescription}
+                          onChange={(e) => setProductDescription(e.target.value)}
+                          placeholder="Mô tả kỹ lưỡng công dụng lý tính, quy cách bảo hành, tính năng nổi bật vượt trội hơn đối thủ, hoặc phản hồi tích cực từng người dùng trước đó để AI chiết tách chuẩn phong vị nhất định..."
+                          className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 text-sm text-slate-800 placeholder-slate-400 font-sans leading-relaxed transition duration-150"
+                        />
+                        <div className="text-right text-[10px] text-slate-400 font-medium font-sans">
+                          {productDescription.length} ký tự
+                        </div>
                       </div>
 
-                      <div className="flex flex-col sm:flex-row items-center gap-4">
-                        <div className="w-28 h-28 shrink-0 bg-white border border-slate-200 rounded-xl flex items-center justify-center relative overflow-hidden group shadow-xxs">
-                          {productImage ? (
-                            <>
-                              <img
-                                src={productImage}
-                                alt="Xem trước sản phẩm"
-                                referrePolicy="no-referrer"
-                                className="w-full h-full object-cover"
-                              />
-                              <button
-                                id="btn-remove-img"
-                                type="button"
-                                onClick={() => setProductImage("")}
-                                className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-bold transition duration-200 cursor-pointer"
-                              >
-                                Gỡ bỏ ảnh
-                              </button>
-                            </>
-                          ) : (
-                            <div className="text-center p-3 text-slate-400 flex flex-col items-center justify-center">
-                              <PhotoIconPlaceholder />
-                              <span className="text-[9px] font-bold uppercase tracking-widest text-slate-350">Không ảnh</span>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex-1 w-full space-y-2.5">
-                          <div className="grid grid-cols-2 gap-2.5">
-                            <div>
-                              <input
-                                type="file"
-                                id="image-file-upload"
-                                accept="image/*"
-                                onChange={handleImageUploadChange}
-                                className="hidden"
-                              />
-                              <label
-                                htmlFor="image-file-upload"
-                                className="w-full py-2.5 px-3 border border-slate-205 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-xxs transition duration-150"
-                              >
-                                <UploadCloud className="w-4 h-4 text-slate-500" />
-                                <span>Thư viện máy</span>
-                              </label>
-                            </div>
-
-                            <button
-                              id="btn-ai-draw"
-                              type="button"
-                              onClick={generateAIImage}
-                              disabled={imageLoading || !productName}
-                              className={`py-2.5 px-3 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all shadow-xxs cursor-pointer ${
-                                !productName
-                                  ? "bg-slate-200 text-slate-400 cursor-not-allowed"
-                                  : "bg-slate-900 hover:bg-slate-800 text-white"
-                              }`}
-                            >
-                              <Sparkles className="w-4 h-4 text-blue-400" />
-                              <span>{imageLoading ? "Đang phác..." : "Vẽ ảnh AI"}</span>
-                            </button>
+                      {parsedSheets.length > 0 && (
+                        <div className="border border-slate-200 rounded-xl p-4 space-y-4 bg-slate-50/50">
+                          <div className="flex items-center gap-2 pb-1 border-b border-slate-100">
+                            <FileSpreadsheet className="w-4 h-4 text-emerald-500 animate-pulse" />
+                            <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 font-sans">
+                              Danh sách bảng dữ liệu đã tải lên ({parsedSheets.length})
+                            </h4>
                           </div>
 
-                          <span className="text-[10px] text-slate-400 hidden sm:block">
-                            * Mô hình Generative AI tự bóc tách tính lý của sản phẩm để khởi tạo tư liệu ảnh tương thích.
-                          </span>
+                          <div className="space-y-3">
+                            {/* Tab buttons for multiple parsed sheets */}
+                            <div className="flex flex-wrap gap-1.5 pb-2 border-b border-slate-250">
+                              {parsedSheets.map((sheet, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => setActiveParsedSheetIndex(idx)}
+                                  className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all cursor-pointer ${
+                                    activeParsedSheetIndex === idx
+                                      ? "bg-slate-900 text-white"
+                                      : "bg-white text-slate-600 hover:bg-slate-200/60 border border-slate-200"
+                                  }`}
+                                >
+                                  📁 {sheet.name}
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* Search cell values tool box */}
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                placeholder="🔍 Lọc nhanh dòng dữ liệu trong sheet..."
+                                value={tableSearchQuery}
+                                onChange={(e) => setTableSearchQuery(e.target.value)}
+                                className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-sans"
+                              />
+                              {tableSearchQuery && (
+                                <button
+                                  type="button"
+                                  onClick={() => setTableSearchQuery("")}
+                                  className="px-2.5 bg-slate-200 text-slate-600 hover:bg-slate-350 text-xs font-bold rounded-lg transition cursor-pointer font-sans"
+                                >
+                                  Xóa
+                                </button>
+                              )}
+                            </div>
+
+                            {/* The Spreadsheet Table Component */}
+                            {parsedSheets[activeParsedSheetIndex] && (
+                              <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white max-h-[250px] overflow-y-auto custom-scrollbar shadow-xxs">
+                                <table className="min-w-full divide-y divide-slate-200 text-left border-collapse table-auto select-none font-sans">
+                                  <tbody className="divide-y divide-slate-200 divide-x divide-slate-100">
+                                    {parsedSheets[activeParsedSheetIndex].rows
+                                      .filter((row) => {
+                                        if (!tableSearchQuery.trim()) return true;
+                                        return row.some((cell) =>
+                                          cell.toLowerCase().includes(tableSearchQuery.toLowerCase())
+                                        );
+                                      })
+                                      .map((row, rIdx) => (
+                                        <tr
+                                          key={rIdx}
+                                          className={`${
+                                            rIdx === 0
+                                              ? "bg-slate-50 font-black text-slate-700 sticky top-0 uppercase text-[9px] tracking-wider"
+                                              : "text-slate-600 hover:bg-slate-100/30 text-[11px] even:bg-slate-50/20"
+                                          }`}
+                                        >
+                                          {row.map((cell, cIdx) => (
+                                            <td
+                                              key={cIdx}
+                                              className="px-3 py-1.5 border-r border-slate-100 truncate max-w-[180px] font-medium leading-normal animate-fade-in"
+                                              title={cell}
+                                            >
+                                              {cell}
+                                            </td>
+                                          ))}
+                                        </tr>
+                                      ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                            
+                            <p className="text-[10px] text-slate-400 italic font-sans">
+                              * Đang hiển thị sheet: <strong>{parsedSheets[activeParsedSheetIndex]?.name}</strong>
+                            </p>
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   </div>
 
-                  <div className="pt-4 border-t border-slate-100">
+                  {/* Image Demo Illustration Module for uploading white bg image */}
+                  <div className="bg-slate-50 p-4 sm:p-5 rounded-xl border border-slate-200 space-y-3.5">
+                    <div className="space-y-1">
+                      <label className="block text-xs font-black uppercase tracking-wider text-slate-700 font-sans">
+                        Ảnh chụp sản phẩm nền trắng (Tùy chọn)
+                      </label>
+                      <p className="text-slate-500 text-[11px] leading-normal font-medium font-sans">
+                        Tải lên ảnh chụp thực tế của sản phẩm trên nền trắng để thiết kế bối cảnh hiển thị trực quan và tối ưu định vị thương hiệu.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-center gap-4">
+                      <div className="w-28 h-28 shrink-0 bg-white border border-slate-200 rounded-xl flex items-center justify-center relative overflow-hidden group shadow-xxs">
+                        {productImage ? (
+                          <>
+                            <img
+                              src={productImage}
+                              alt="Xem trước sản phẩm"
+                              referrePolicy="no-referrer"
+                              className="w-full h-full object-cover"
+                            />
+                            <button
+                              id="btn-remove-img"
+                              type="button"
+                              onClick={() => setProductImage("")}
+                              className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-bold transition duration-200 cursor-pointer font-sans"
+                            >
+                              Gỡ bỏ ảnh
+                            </button>
+                          </>
+                        ) : (
+                          <div className="text-center p-3 text-slate-400 flex flex-col items-center justify-center">
+                            <PhotoIconPlaceholder />
+                            <span className="text-[9px] font-bold uppercase tracking-widest text-slate-350 font-sans">Không ảnh</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex-1 w-full space-y-2">
+                        <input
+                          type="file"
+                          id="image-file-upload"
+                          accept="image/*"
+                          onChange={handleImageUploadChange}
+                          className="hidden"
+                        />
+                        <label
+                          htmlFor="image-file-upload"
+                          className="w-full py-3 px-4 border border-slate-250 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xxs transition duration-150 font-sans"
+                        >
+                          <UploadCloud className="w-4 h-4 text-blue-600" />
+                          <span>Tải lên ảnh sản phẩm từ thiết bị</span>
+                        </label>
+                        <p className="text-[10px] text-slate-400 font-medium font-sans">
+                          Hỗ trợ định dạng: PNG, JPG, JPEG, WEBP. Nên sử dụng ảnh sản phẩm có nền trắng sạch để làm cơ sở thiết kế.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-slate-100">
                     <button
                       id="btn-submit-step1"
                       type="button"
