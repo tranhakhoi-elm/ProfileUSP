@@ -7,7 +7,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import dotenv from "dotenv";
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 import { createServer as createViteServer } from "vite";
 
 // Load environment variables
@@ -155,6 +155,7 @@ app.use(express.json({ limit: "15mb" }));
         model: "gemini-3.5-flash",
         contents: { parts: contents },
         config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           systemInstruction: "Bạn là trưởng bộ phận nghiên cứu thị trường có am hiểu chuyên sâu về hành vi người tiêu dùng Việt Nam, luôn cung cấp câu trả lời khách quan, rõ nghĩa, chi tiết sâu sắc.",
           responseMimeType: "application/json",
           responseSchema: {
@@ -264,6 +265,7 @@ app.use(express.json({ limit: "15mb" }));
         model: "gemini-3.5-flash",
         contents: promptText,
         config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           systemInstruction: "Bạn là chuyên gia lập kế hoạch định vị thương hiệu và viết lời quảng cáo Copywriter đỉnh cao tại Việt Nam.",
           responseMimeType: "application/json",
           responseSchema: {
@@ -345,6 +347,7 @@ app.use(express.json({ limit: "15mb" }));
           model: "gemini-3.5-flash",
           contents: promptText,
           config: {
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
             systemInstruction: "Bạn là giám đốc chiến lược hình ảnh thương hiệu và Copywriter bậc thầy tại Việt Nam. Trả lời chi tiết, chuyên nghiệp và có chiều sâu.",
             responseMimeType: "application/json",
             responseSchema: {
