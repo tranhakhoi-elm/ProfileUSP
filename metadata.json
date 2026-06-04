@@ -1,0 +1,8 @@
+{
+  "name": "USP",
+  "description": "Ứng dụng giúp tạo file master sản phẩm hoàn chỉnh thông qua phân tích chân dung khách hàng và xây dựng 5 giải pháp USP cốt lõi bằng Gemini AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
