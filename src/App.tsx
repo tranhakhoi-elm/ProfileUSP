@@ -31,7 +31,14 @@ import {
   ChevronDown,
   Eye,
   BookOpen,
-  ExternalLink
+  ExternalLink,
+  Cloud,
+  ShieldCheck,
+  Key,
+  Folder,
+  Settings,
+  Lock,
+  CloudLightning
 } from "lucide-react";
 import { CriteriaAnalysisItem, CustomerPersona, PainPointUSP, ProductInput, FinalMasterRow, ParsedSheet } from "./types";
 
@@ -47,6 +54,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
 
   // Step 1: Inputs
+  const [productCode, setProductCode] = useState<string>(() => {
+    return localStorage.getItem("brand_hub_product_code") || "";
+  });
   const [productName, setProductName] = useState<string>("");
   const [productDescription, setProductDescription] = useState<string>("");
   const [productImage, setProductImage] = useState<string>("");
@@ -81,10 +91,58 @@ export default function App() {
 
   // Export & Copy Success feedback
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
-  const [copyNotebookSuccess, setCopyNotebookSuccess] = useState<boolean>(false);
 
   // Step 5: Finalized report rows (8-column matrix from AI)
   const [reportRows, setReportRows] = useState<FinalMasterRow[]>([]);
+
+  // CONFIG MẶC ĐỊNH CHO DRIVE (CỐ ĐỊNH PHẦN MỀM) - Điền tại đây để không cần nhập cấu hình ở giao diện
+  const FIXED_GOOGLE_CLIENT_ID = "1095593881473-b3jksv3vfvf18vsmshdf7oqmve8c3g5p.apps.googleusercontent.com";
+  const FIXED_GOOGLE_FOLDER_ID = "1P2_qgI3LzL8CgV4jA-yX1pC-tG3_Gv77";
+
+  // Google Drive & Webhook Sync State Configuration
+  const [syncMethod, setSyncMethod] = useState<"gdrive" | "webhook">(() => {
+    return (localStorage.getItem("brand_hub_sync_method") as "gdrive" | "webhook") || "gdrive";
+  });
+  const [googleClientId, setGoogleClientId] = useState<string>(() => {
+    return localStorage.getItem("brand_hub_google_client_id") || FIXED_GOOGLE_CLIENT_ID || "";
+  });
+  const [googleFolderId, setGoogleFolderId] = useState<string>(() => {
+    return localStorage.getItem("brand_hub_google_folder_id") || FIXED_GOOGLE_FOLDER_ID || "";
+  });
+  const [webhookUrl, setWebhookUrl] = useState<string>(() => {
+    return localStorage.getItem("brand_hub_webhook_url") || "";
+  });
+
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncSuccessResult, setSyncSuccessResult] = useState<{ webUrl: string | null; directDownloadUrl?: string; message?: string } | null>(null);
+  const [showSyncConfig, setShowSyncConfig] = useState<boolean>(false);
+  const [showAdvancedSync, setShowAdvancedSync] = useState<boolean>(false);
+
+  // Sync localStorage persistence
+  useEffect(() => {
+    localStorage.setItem("brand_hub_sync_method", syncMethod);
+    localStorage.setItem("brand_hub_google_client_id", googleClientId);
+    localStorage.setItem("brand_hub_google_folder_id", googleFolderId);
+    localStorage.setItem("brand_hub_webhook_url", webhookUrl);
+  }, [syncMethod, googleClientId, googleFolderId, webhookUrl]);
+
+  // Sync product code local storage persistence
+  useEffect(() => {
+    localStorage.setItem("brand_hub_product_code", productCode);
+  }, [productCode]);
+
+  // Load Google Identity Services dynamically
+  useEffect(() => {
+    const link = document.createElement("script");
+    link.src = "https://accounts.google.com/gsi/client";
+    link.async = true;
+    link.defer = true;
+    document.body.appendChild(link);
+    return () => {
+      // Cleanup is safe
+    };
+  }, []);
 
   // Drag and drop event handlers
   const handleDrag = (e: React.DragEvent) => {
@@ -725,7 +783,7 @@ export default function App() {
     setTimeout(() => setCopySuccess(false), 2500);
   };
 
-  const handleDownloadCSV = () => {
+  const generateXlsxWorkbook = () => {
     const chosenPersona = editedPersona || (selectedPersonaIndex !== null ? personas[selectedPersonaIndex] : null);
 
     // Create a new workbook
@@ -815,70 +873,227 @@ export default function App() {
     XLSX.utils.book_append_sheet(wb, ws1, "1. Tong quan & USP");
     XLSX.utils.book_append_sheet(wb, ws2, "2. Ma tran 8 Cot Chien dich");
 
-    // Write file directly with native .xlsx suffix
-    const fileBaseName = productName.replace(/[^a-zA-Z0-9]/g, "_") || "san_pham";
-    XLSX.writeFile(wb, `Master_File_USP_Strategic_Report_${fileBaseName}.xlsx`);
+    return wb;
   };
 
-  const generateNotebookLMPrompt = () => {
-    const chosenPersona = editedPersona || (selectedPersonaIndex !== null ? personas[selectedPersonaIndex] : null);
-
-    let doc = `# TÀI LIỆU NGUỒN ĐỊNH VỊ THƯƠNG HIỆU & HỆ THỐNG USP SẢN PHẨM PHÂN TÍCH BỞI AI\n`;
-    doc += `========================================================\n\n`;
+  const getCustomFileName = () => {
+    const pad = (num: number) => String(num).padStart(2, '0');
+    const now = new Date();
+    const d = pad(now.getDate());
+    const m = pad(now.getMonth() + 1);
+    const y = now.getFullYear();
+    const h = pad(now.getHours());
+    const min = pad(now.getMinutes());
+    const timeStr = `${d}_${m}_${y}_${h}h${min}`;
     
-    doc += `## I. THÔNG TIN SẢN PHẨM KHAI BÁO CỐT LÕI\n`;
-    doc += `- Tên sản phẩm: ${productName}\n`;
-    doc += `- Mô tả chi tiết và tính năng: ${productDescription}\n\n`;
-
-    doc += `## II. CHÂN DUNG KHÁCH HÀNG LÝ TƯỞNG (PERSONA MỤC TIÊU)\n`;
-    doc += `- Nhóm khách hàng: ${chosenPersona?.name || "N/A"}\n`;
-    doc += `- Đặc điểm Nhân khẩu học & Hành vi: ${chosenPersona?.demographics || "N/A"}\n`;
-    doc += `- Nỗi bức xúc, vấn đề hoặc nỗi đau lớn nhất: ${chosenPersona?.painPoints || "N/A"}\n`;
-    doc += `- Lợi ích mong muốn & Giá trị cốt lõi giải quyết: ${chosenPersona?.benefits || "N/A"}\n`;
-    doc += `- Phương châm hành động đặc thù: "${chosenPersona?.summary || "N/A"}"\n\n`;
-
-    doc += `## III. BẢNG CHIẾN LƯỢC ĐỊNH VỊ 8 BƯỚC MARKETING CHI TIẾT (MASTER USP BOARD)\n`;
-    doc += `Dưới đây là bảng phân tích kịch bản tương tác và định hướng nội dung qua 8 bước tâm lý từ khi khách hàng chưa biết sản phẩm đến hành động trung thành:\n\n`;
-
-    reportRows.forEach((row) => {
-      doc += `### BƯỚC ${row.stt}: ${row.step}\n`;
-      doc += `- Mục tiêu tâm lý: ${row.psychologicalGoal}\n`;
-      doc += `- Nỗi đau & Mong muốn chạm tới: ${row.painPointAndDesire}\n`;
-      doc += `- Các bước hành động cụ thể: ${row.stepsDetail}\n`;
-      doc += `- USP và giải pháp giá trị cốt lõi: ${row.uspDetail}\n`;
-      doc += `- Tiêu đề truyền thông (Headline - Subheadline): ${row.headlineSubheadline}\n`;
-      doc += `- Định hướng hình ảnh (Visual Key): ${row.visualKey}\n`;
-      doc += `\n`;
-    });
-
-    doc += `========================================================\n`;
-    doc += `HƯỚNG DẪN DÀNH CHO BẠN KHI DÙNG VỚI NOTEBOOKLM:\n`;
-    doc += `Sử dụng tài liệu này làm Source (Nguồn) chính trong NotebookLM để:\n`;
-    doc += `1. Yêu cầu tạo kịch bản video ngắn (TikTok, Reels, Shorts) theo từng Bước tâm lý ở trên.\n`;
-    doc += `2. Soạn thảo chuỗi bài viết email nuôi dưỡng (Email Nurturing) cho tệp khách hàng mục tiêu.\n`;
-    doc += `3. Tạo bản tóm tắt nội dung âm thanh (Audio Overview Podcast) giới thiệu dự án định vị.\n`;
-    doc += `4. Hỏi bất kỳ câu hỏi nào để đào sâu chiến lược bán lẻ hoặc xây dựng thương hiệu dựa trên tài liệu này.\n`;
-    return doc;
+    const code = productCode.trim() || "MA";
+    const name = productName.trim() || "San_pham";
+    
+    // Naming formula: Mã sản phẩm - Tên sản phẩm - thơi gian tạo file
+    const rawName = `${code} - ${name} - ${timeStr}`;
+    
+    // Sanitize illegal filename characters
+    return rawName.replace(/[\/\\:\*\?"<>\|]/g, "_");
   };
 
-  const handleCopyNotebookLM = () => {
-    const doc = generateNotebookLMPrompt();
-    navigator.clipboard.writeText(doc);
-    setCopyNotebookSuccess(true);
-    setTimeout(() => setCopyNotebookSuccess(false), 2500);
+  const handleDownloadCSV = () => {
+    const wb = generateXlsxWorkbook();
+    const filename = `${getCustomFileName()}.xlsx`;
+    XLSX.writeFile(wb, filename);
   };
 
-  const handleDownloadNotebookLM = () => {
-    const doc = generateNotebookLMPrompt();
-    const blob = new Blob([doc], { type: "text/plain;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `NotebookLM_Source_${productName.replace(/[^a-zA-Z0-9]/g, "_") || "san_pham"}.txt`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleMainSyncClick = () => {
+    setSyncSuccessResult(null);
+    setSyncError(null);
+    
+    const activeClientId = googleClientId.trim() || FIXED_GOOGLE_CLIENT_ID;
+    if (!activeClientId) {
+      setShowSyncConfig(true);
+      setSyncError("Hệ thống chưa thiết lập Google Client ID gốc. Vui lòng bấm cấu hình để cài đặt.");
+      return;
+    }
+    
+    // Run direct, seamless sync
+    handleSyncToGoogleDrive();
   };
+
+  const handleSyncToGoogleDrive = async () => {
+    setIsSyncing(true);
+    setSyncError(null);
+    setSyncSuccessResult(null);
+
+    try {
+      // 1. Generate local XLSX workbook using sheet data
+      const wb = generateXlsxWorkbook();
+      
+      // 2. Convert workbook to Base64 in-browser
+      const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+      const binary = new Uint8Array(wbout);
+      let binaryString = "";
+      for (let i = 0; i < binary.length; i++) {
+        binaryString += String.fromCharCode(binary[i]);
+      }
+      const fileBase64 = btoa(binaryString);
+
+      // 3. Define modern filename using the new naming formula
+      const filename = `${getCustomFileName()}.xlsx`;
+
+      if (syncMethod === "gdrive") {
+        const activeClientId = googleClientId.trim() || FIXED_GOOGLE_CLIENT_ID;
+        if (!activeClientId) {
+          throw new Error("Vui lòng cấu hình Google OAuth Client ID của bạn để tiến hành đồng bộ.");
+        }
+
+        // Initialize GIS Token Client dynamically on demand
+        if (!(window as any).google?.accounts?.oauth2) {
+          throw new Error("Thư viện đăng nhập Google chưa được tải hoàn toàn. Vui lòng thử lại sau vài giây.");
+        }
+
+        const tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
+          client_id: activeClientId,
+          scope: "https://www.googleapis.com/auth/drive.file",
+          callback: async (tokenResponse: any) => {
+            if (tokenResponse.error_description) {
+              setIsSyncing(false);
+              setSyncError("Đăng nhập Google thất bại: " + tokenResponse.error_description);
+              return;
+            }
+
+            const token = tokenResponse.access_token;
+            if (!token) {
+              setIsSyncing(false);
+              setSyncError("Không thể lấy token xác thực từ tài khoản Google của bạn.");
+              return;
+            }
+
+            try {
+              // Upload process!
+              // Step A: Check / Create the target folder using fixed folder id fallback or search path
+              let parentFolderId = googleFolderId.trim() || FIXED_GOOGLE_FOLDER_ID;
+
+              if (!parentFolderId) {
+                // Auto create or reuse "AI Brand Strategy Hub" folder if no ID is specified
+                console.log("Searching for folder on Google Drive...");
+                const searchRes = await fetch(
+                  `https://www.googleapis.com/drive/v3/files?q=name='AI Brand Strategy Hub' and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id)`,
+                  {
+                    headers: { Authorization: `Bearer ${token}` }
+                  }
+                );
+                
+                if (searchRes.ok) {
+                  const searchData = await searchRes.json();
+                  if (searchData.files && searchData.files.length > 0) {
+                    parentFolderId = searchData.files[0].id;
+                  } else {
+                    console.log("Creating brand new 'AI Brand Strategy Hub' folder...");
+                    const createFolderRes = await fetch("https://www.googleapis.com/drive/v3/files?fields=id", {
+                      method: "POST",
+                      headers: {
+                        Authorization: `Bearer ${token}`,
+                        "Content-Type": "application/json",
+                      },
+                      body: JSON.stringify({
+                        name: "AI Brand Strategy Hub",
+                        mimeType: "application/vnd.google-apps.folder",
+                      }),
+                    });
+
+                    if (createFolderRes.ok) {
+                      const folderData = await createFolderRes.json();
+                      parentFolderId = folderData.id;
+                    }
+                  }
+                }
+              }
+
+              // Step B: Form multipart payload
+              const fileBlob = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+              const metadata = {
+                name: filename,
+                mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                parents: parentFolderId ? [parentFolderId] : [],
+              };
+
+              const form = new FormData();
+              form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+              form.append("file", fileBlob);
+
+              console.log("Uploading file content directly to Google Drive...");
+              const uploadRes = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink", {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+                body: form,
+              });
+
+              if (!uploadRes.ok) {
+                const errText = await uploadRes.text();
+                throw new Error("Lỗi tải tệp: " + errText);
+              }
+
+              const resultData = await uploadRes.json();
+              const fileUrl = resultData.webViewLink || `https://drive.google.com/file/d/${resultData.id}/view`;
+              
+              setSyncSuccessResult({
+                webUrl: fileUrl,
+                directDownloadUrl: `https://drive.google.com/uc?export=download&id=${resultData.id}`,
+                message: `Tuyệt vời! Tập tin của bạn đã được đồng bộ trực tiếp lên Google Drive cố định thành công.`
+              });
+
+              // Automate opening the file link in a brand new tab!
+              window.open(fileUrl, "_blank");
+
+            } catch (innerErr: any) {
+              setSyncError(innerErr?.message || "Đã xảy ra lỗi trong quá trình tải tệp lên Google Drive.");
+            } finally {
+              setIsSyncing(false);
+            }
+          },
+        });
+
+        // Trigger Google Login and Consent popup!
+        tokenClient.requestAccessToken();
+
+      } else if (syncMethod === "webhook") {
+        if (!webhookUrl) {
+          throw new Error("Thiếu địa chỉ Webhook trigger URL.");
+        }
+
+        const payload = {
+          syncMethod: "webhook",
+          fileBase64,
+          filename,
+          webhookUrl
+        };
+
+        const res = await fetch("/api/gdrive-sync", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || "Giao tiếp máy chủ đồng bộ thất bại.");
+        }
+
+        setSyncSuccessResult({
+          webUrl: data.webUrl || null,
+          message: data.message || "Đã kích hoạt Webhook đồng bộ Google Drive thành công!"
+        });
+        setIsSyncing(false);
+      }
+    } catch (err: any) {
+      setSyncError(err?.message || "Đã xảy ra lỗi không rõ trong quá trình đồng bộ.");
+      setIsSyncing(false);
+    }
+  };
+
+
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col selection:bg-blue-600 selection:text-white overflow-x-hidden">
@@ -1147,18 +1362,33 @@ export default function App() {
                     )}
                   </div>
 
-                  <div>
-                    <label id="lbl-prod-name" className="block text-xs font-black uppercase tracking-wider text-slate-700 mb-1.5 font-sans">
-                      Tên sản phẩm thiết bị / Dịch vụ *
-                    </label>
-                    <input
-                      id="input-prod-name"
-                      type="text"
-                      value={productName}
-                      onChange={(e) => setProductName(e.target.value)}
-                      placeholder="Ví dụ: Máy lọc không khí PureFlow 3000, Khóa học AI Copywriting đỉnh cao..."
-                      className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 text-sm text-slate-800 placeholder-slate-400 font-medium transition duration-150"
-                    />
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="md:col-span-1">
+                      <label id="lbl-prod-code" className="block text-xs font-black uppercase tracking-wider text-slate-700 mb-1.5 font-sans">
+                        Mã sản phẩm
+                      </label>
+                      <input
+                        id="input-prod-code"
+                        type="text"
+                        value={productCode}
+                        onChange={(e) => setProductCode(e.target.value)}
+                        placeholder="Ví dụ: PF-3000, AI-COPY..."
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 text-sm text-slate-800 placeholder-slate-400 font-medium transition duration-150"
+                      />
+                    </div>
+                    <div className="md:col-span-3">
+                      <label id="lbl-prod-name" className="block text-xs font-black uppercase tracking-wider text-slate-700 mb-1.5 font-sans">
+                        Tên sản phẩm thiết bị / Dịch vụ *
+                      </label>
+                      <input
+                        id="input-prod-name"
+                        type="text"
+                        value={productName}
+                        onChange={(e) => setProductName(e.target.value)}
+                        placeholder="Ví dụ: Máy lọc không khí PureFlow 3000, Khóa học AI Copywriting đỉnh cao..."
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 text-sm text-slate-800 placeholder-slate-400 font-medium transition duration-150"
+                      />
+                    </div>
                   </div>
 
                   <div>
@@ -2014,9 +2244,19 @@ export default function App() {
                   <div className="absolute top-0 right-0 w-48 h-48 bg-blue-600/10 rounded-full blur-3xl pointer-events-none"></div>
                   
                   <div className="space-y-1">
-                    <span className="text-[10px] bg-green-500 text-slate-950 font-black px-2.5 py-0.5 rounded-full uppercase tracking-widest block w-max mb-1.5">
-                      TIẾN TRÌNH ĐÃ HOÀN TẤT
-                    </span>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-[10px] bg-green-500 text-slate-950 font-black px-2.5 py-0.5 rounded-full uppercase tracking-widest block w-max">
+                        TIẾN TRÌNH ĐÃ HOÀN TẤT
+                      </span>
+                      {/* Hidden Admin Config tool icon */}
+                      <button 
+                        onClick={() => setShowSyncConfig(!showSyncConfig)}
+                        title="Cài đặt cấu hình Đồng bộ Google Drive"
+                        className="text-slate-500 hover:text-indigo-400 p-1 rounded-md transition cursor-pointer"
+                      >
+                        <Settings className="w-3.5 h-3.5 animate-spin" style={{ animationDuration: "12s" }} />
+                      </button>
+                    </div>
                     <h3 className="text-lg sm:text-xl font-extrabold tracking-tight text-slate-100">
                       Bản Phê Duyệt File Master Độc Quyền USP
                     </h3>
@@ -2045,6 +2285,20 @@ export default function App() {
                     </button>
 
                     <button
+                      id="btn-sync-gdrive"
+                      onClick={handleMainSyncClick}
+                      disabled={isSyncing}
+                      className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-800 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-indigo-500/20"
+                    >
+                      {isSyncing ? (
+                        <RefreshCw className="w-4 h-4 animate-spin text-indigo-300" />
+                      ) : (
+                        <Cloud className="w-4 h-4" />
+                      )}
+                      <span>{isSyncing ? "Đang đồng bộ..." : "Đồng bộ Google Drive"}</span>
+                    </button>
+
+                    <button
                       id="btn-print"
                       onClick={() => window.print()}
                       className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xxs"
@@ -2055,83 +2309,329 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Google NotebookLM Integration Toolkit Card */}
-                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-150 p-6 rounded-2xl print:hidden space-y-4 shadow-xxs">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div className="flex items-start gap-3">
-                      <div className="p-2.5 bg-blue-600 text-white rounded-xl shadow-xs shrink-0 mt-0.5">
-                        <BookOpen className="w-5 h-5 animate-pulse" />
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="font-extrabold text-slate-900 text-sm sm:text-base tracking-tight">Kích Hoạt Tài Nguyên Google NotebookLM</h4>
-                          <span className="text-[9px] bg-indigo-600 text-white font-bold px-2 py-0.5 rounded-full uppercase tracking-widest leading-none">Mở Rộng Đăng Ký AI</span>
+                {/* Real-time Inline Sync Status Feedback Notification Block */}
+                {(isSyncing || syncSuccessResult || syncError) && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-5 rounded-2xl border print:hidden font-sans space-y-4 bg-slate-900 border-slate-800 text-white shadow-xl relative overflow-hidden"
+                  >
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-2xl pointer-events-none"></div>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-start gap-3.5">
+                        <div className={`p-2.5 rounded-xl shrink-0 ${isSyncing ? 'bg-indigo-600 text-indigo-100 animate-spin' : syncError ? 'bg-red-950 text-red-400 border border-red-900/50' : 'bg-green-950 text-green-400 border border-green-900/50'}`}>
+                          {isSyncing ? <RefreshCw className="w-5 h-5" /> : syncError ? <AlertCircle className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
                         </div>
-                        <p className="text-slate-650 text-xs leading-relaxed max-w-2xl font-medium">
-                          Google NotebookLM là công cụ ghi chú thông minh tuyệt đỉnh. Bạn có thể nạp toàn bộ kết quả File Master USP này để tự động tạo <strong>Audio Podcast đối thoại</strong>, chatbot trả lời chuyên sâu, kịch bản video ngắn, bài viết PR chuẩn xác nhất.
-                        </p>
+                        <div className="space-y-1">
+                          <h4 className="font-extrabold text-slate-100 text-sm tracking-tight uppercase">
+                            {isSyncing ? "Đang đẩy báo cáo lên Google Drive..." : syncError ? "Thiết lập hoặc truyền dữ liệu lỗi" : "Ứng dụng G-Drive đã hoàn thành!"}
+                          </h4>
+                          <p className="text-slate-400 text-xs font-medium leading-relaxed max-w-2xl">
+                            {isSyncing 
+                              ? "Vui lòng hoàn thành quá trình xác minh danh tính và cấp quyền nếu Google hiển thị popup đăng nhập. Tệp Sheets sẽ tự động mở sau khi hoàn tất..." 
+                              : syncError 
+                                ? syncError 
+                                : `Tập tin Master độc quyền USP của bạn đã được khởi tạo thành công trên thư mục Google Drive cố định. Trình duyệt đang tự động chuyển tiếp bạn tới trang.`}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-2 shrink-0">
-                      <a
-                        href="https://notebooklm.google"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition whitespace-nowrap shadow-sm shadow-indigo-500/20"
-                      >
-                        <span>Truy cập NotebookLM</span>
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                    </div>
-                  </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                    {/* Action 1: Download Source */}
-                    <div className="bg-white/80 backdrop-blur-xs p-4 rounded-xl border border-slate-200/60 hover:border-blue-400/50 transition flex flex-col justify-between gap-3">
-                      <div className="space-y-1.5">
-                        <div className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                          <FileText className="w-4 h-4 text-blue-600" />
-                          <span>1. Tải Tệp Nguồn (.txt)</span>
-                        </div>
-                        <p className="text-slate-550 text-[11px] leading-relaxed font-semibold">
-                          Tải file văn bản được thiết kế cấu trúc tối ưu cho AI của NotebookLM đọc hiểu thấu đáo nhất.
+                      {!isSyncing && (
+                        <button
+                          onClick={() => { setSyncSuccessResult(null); setSyncError(null); }}
+                          className="text-xs text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-750 p-1 px-2.5 rounded-md transition cursor-pointer"
+                        >
+                          Đóng
+                        </button>
+                      )}
+                    </div>
+
+                    {syncSuccessResult?.webUrl && (
+                      <div className="pt-2 flex flex-wrap items-center gap-3 border-t border-slate-800/80">
+                        <a
+                          href={syncSuccessResult.webUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center gap-2 transition shadow-lg shadow-indigo-500/20 animate-pulse hover:animate-none"
+                        >
+                          <Eye className="w-4 h-4 text-indigo-200" />
+                          <span>Mở xem trang tính trực tuyến (Google Sheets)</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                        <p className="text-[10px] text-slate-500 font-semibold leading-normal font-sans">
+                          * Lưu ý: Nếu tab mới chưa được mở, hãy nhấp vào nút ở trên hoặc tắt chặn popup của trình duyệt.
                         </p>
                       </div>
-                      <button
-                        onClick={handleDownloadNotebookLM}
-                        className="w-full py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    )}
+                  </motion.div>
+                )}
+
+                {/* Cloud Sync and Google Drive configuration Panel */}
+                {showSyncConfig && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="bg-slate-900 border border-slate-800 text-slate-100 p-6 rounded-2xl print:hidden space-y-6 shadow-lg overflow-hidden"
+                  >
+                    <div className="flex items-start justify-between gap-4 border-b border-slate-800 pb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-xs shrink-0">
+                          <Cloud className="w-5 h-5 animate-pulse text-indigo-400" />
+                        </div>
+                        <div>
+                          <h4 className="font-extrabold text-slate-100 text-sm sm:text-base tracking-tight">Đồng bộ Đám mây Google Drive</h4>
+                          <p className="text-slate-400 text-xs mt-0.5 font-medium leading-relaxed font-sans">
+                            Sao lưu và lưu trữ tự động báo cáo master chất lượng cao trực tiếp trên tài khoản Drive cá nhân bảo mật của bạn.
+                          </p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => setShowSyncConfig(false)} 
+                        className="text-xs text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-750 p-1.5 px-3 rounded-md transition cursor-pointer font-bold animate-fadeIn"
                       >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Tải tệp nguồn cho NotebookLM</span>
+                        Đóng
                       </button>
                     </div>
 
-                    {/* Action 2: Copy Raw Text */}
-                    <div className="bg-white/80 backdrop-blur-xs p-4 rounded-xl border border-slate-200/60 hover:border-blue-400/50 transition flex flex-col justify-between gap-3">
-                      <div className="space-y-1.5">
-                        <div className="font-bold text-slate-850 text-xs flex items-center gap-1.5">
-                          <Copy className="w-4 h-4 text-blue-600" />
-                          <span>2. Copy Chọn & Paste Nhanh</span>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                      {/* Configuration fields layout split */}
+                      <div className="md:col-span-2 space-y-5">
+                        
+                        {/* Summary of what will be synced */}
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-850 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400 text-xs font-bold font-sans">Thư mục lưu trữ mặc định:</span>
+                            <span className="text-xs font-bold text-indigo-400 font-mono bg-indigo-950/50 px-2 py-0.5 rounded-md border border-indigo-900/30">
+                              {googleFolderId.trim() || 'AI Brand Strategy Hub'}
+                            </span>
+                          </div>
+                          
+                          <div className="space-y-1">
+                            <span className="text-slate-400 text-xs font-bold font-sans block">Tên tệp định dạng công thức:</span>
+                            <div className="p-2 bg-slate-900 rounded-lg text-xs font-mono text-slate-300 break-all border border-slate-800/80 flex items-center gap-2">
+                              <FileSpreadsheet className="w-4 h-4 text-green-500 shrink-0" />
+                              <span>{getCustomFileName()}.xlsx</span>
+                            </div>
+                          </div>
                         </div>
-                        <p className="text-slate-550 text-[11px] leading-relaxed font-semibold">
-                          Sao chép văn bản nguồn cực nhanh bằng 1 click để paste trực tiếp vào Thêm nguồn (Pasted text) của NotebookLM.
-                        </p>
-                      </div>
-                      <button
-                        onClick={handleCopyNotebookLM}
-                        className="w-full py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
-                      >
-                        {copyNotebookSuccess ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5 text-slate-500" />}
-                        <span>{copyNotebookSuccess ? "Đã sao chép nguồn!" : "Sao chép nhanh nguồn dịch"}</span>
-                      </button>
-                    </div>
-                  </div>
 
-                  <div className="bg-indigo-50/50 p-3 rounded-lg border border-indigo-100 text-[11px] text-slate-600 leading-snug font-medium">
-                    <strong>💡 Hướng dẫn nhanh:</strong> Truy cập <strong>notebooklm.google</strong> → Tạo một Notebook mới → Chọn Thêm Nguồn (Add Source) → Chọn Tệp đã tải/Dán văn bản đã copy → Sử dụng tính năng <em>"Audio Overview"</em> ở góc phải để sinh audio podcast tiếng Anh hoàn hảo phân tích định vị sản phẩm của bạn.
-                  </div>
-                </div>
+                        {/* If client ID is missing, show prominent inline warning and request */}
+                        {!googleClientId.trim() && (
+                          <div className="p-4 bg-yellow-950/40 border border-yellow-800/50 rounded-xl text-yellow-105 space-y-3">
+                            <div className="flex items-start gap-2.5">
+                              <AlertCircle className="w-4 h-4 shrink-0 text-yellow-400 mt-0.5" />
+                              <div className="space-y-1">
+                                <span className="font-extrabold text-xs uppercase tracking-wide">Yêu cầu thiết lập ban đầu (Chỉ 1 lần duy nhất)</span>
+                                <p className="text-[11px] leading-relaxed text-yellow-250">
+                                  Bạn cần cung cấp <strong>Google Client ID (Mã ứng dụng)</strong> của mình để bắt đầu liên kết đồng bộ trực tiếp lên tài khoản Google Drive bảo mật của riêng bạn.
+                                </p>
+                              </div>
+                            </div>
+                            
+                            <div className="space-y-1.5 pt-1">
+                              <label className="block text-[10px] font-black uppercase tracking-wider text-yellow-350 font-sans">Google Client ID *</label>
+                              <div className="relative">
+                                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-500">
+                                  <Key className="w-4 h-4" />
+                                </span>
+                                <input
+                                  type="text"
+                                  value={googleClientId}
+                                  placeholder="your-app-id.apps.googleusercontent.com"
+                                  onChange={(e) => setGoogleClientId(e.target.value)}
+                                  className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono text-slate-200 focus:outline-hidden focus:border-indigo-500 transition placeholder:text-slate-600"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Execute Button and quick feedback */}
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-4 pt-1">
+                          <button
+                            onClick={handleSyncToGoogleDrive}
+                            disabled={isSyncing || !googleClientId.trim()}
+                            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-850 disabled:text-slate-550 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 transition cursor-pointer shadow-md shadow-indigo-500/20 shrink-0"
+                          >
+                            {isSyncing ? (
+                              <RefreshCw className="w-4 h-4 animate-spin text-indigo-200" />
+                            ) : (
+                              <Cloud className="w-4 h-4" />
+                            )}
+                            <span>{isSyncing ? "Đang đẩy dữ liệu lên Google Drive..." : "Bắt đầu Đồng bộ dữ liệu"}</span>
+                          </button>
+
+                          <p className="text-[10px] text-slate-400 font-semibold leading-normal max-w-sm">
+                            Hệ thống kết nối trực tiếp đến Google Drive cá nhân của bạn, không lưu trữ thông tin trung gian, cam kết riêng tư 100%.
+                          </p>
+                        </div>
+
+                        {/* Sync feedback panel */}
+                        {syncError && (
+                          <div className="p-3 bg-red-950 border border-red-900 rounded-lg text-red-200 text-xs font-medium flex items-start gap-2.5 animate-fadeIn">
+                            <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
+                            <div className="space-y-0.5">
+                              <span className="font-bold">Đồng bộ thất bại:</span>
+                              <p className="opacity-90 leading-relaxed text-[11px] font-sans font-medium">{syncError}</p>
+                            </div>
+                          </div>
+                        )}
+
+                        {syncSuccessResult && (
+                          <div className="p-4 bg-green-950/80 border border-green-900 rounded-xl text-green-200 space-y-3.5 animate-fadeIn">
+                            <div className="flex items-start gap-2.5">
+                              <CheckCircle2 className="w-5 h-5 shrink-0 text-green-400 mt-0.5 animate-bounce" />
+                              <div className="space-y-0.5">
+                                <span className="font-bold text-sm">Đồng bộ Google Drive thành công!</span>
+                                <p className="opacity-90 leading-relaxed text-xs font-sans font-semibold">{syncSuccessResult.message}</p>
+                              </div>
+                            </div>
+
+                            {(syncSuccessResult.webUrl || syncSuccessResult.directDownloadUrl) && (
+                              <div className="flex flex-col sm:flex-row gap-2.5 pt-1 border-t border-green-900/50">
+                                {syncSuccessResult.webUrl && (
+                                  <a
+                                    href={syncSuccessResult.webUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition shrink-0"
+                                  >
+                                    <Eye className="w-3.5 h-3.5 text-indigo-200" />
+                                    <span>Mở xem trực tuyến (Google Sheets)</span>
+                                  </a>
+                                )}
+
+                                {syncSuccessResult.directDownloadUrl && (
+                                  <a
+                                    href={syncSuccessResult.directDownloadUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition"
+                                  >
+                                    <Download className="w-3.5 h-3.5 text-slate-400" />
+                                    <span>Tải File .XLSX Trực Tiếp</span>
+                                  </a>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Advanced configurations collapsible trigger */}
+                        <div className="pt-2 border-t border-slate-800/60">
+                          <button
+                            type="button"
+                            onClick={() => setShowAdvancedSync(!showAdvancedSync)}
+                            className="text-[11px] text-slate-400 hover:text-indigo-400 font-bold flex items-center gap-1 bg-slate-950 p-2 px-3 rounded-lg border border-slate-850 hover:border-indigo-900 transition cursor-pointer"
+                          >
+                            <Settings className="w-3.5 h-3.5 animate-spin" style={{ animationDuration: '6s' }} />
+                            <span>{showAdvancedSync ? "Ẩn tùy chọn nâng cao & Webhook" : "Hiện tùy chọn nâng cao & Webhook"}</span>
+                          </button>
+                        </div>
+
+                        {/* Collapsed advanced configurations */}
+                        {showAdvancedSync && (
+                          <motion.div 
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            className="bg-slate-950/65 p-4 rounded-xl border border-slate-850 space-y-4 animate-fadeIn"
+                          >
+                            <div className="grid grid-cols-2 p-1 bg-slate-950 rounded-lg max-w-sm border border-slate-800">
+                              <button
+                                onClick={() => { setSyncMethod("gdrive"); setSyncSuccessResult(null); }}
+                                className={`py-1 rounded-md text-[10px] font-black transition cursor-pointer uppercase tracking-wider ${syncMethod === "gdrive" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-slate-200"}`}
+                              >
+                                Google Drive Direct
+                              </button>
+                              <button
+                                onClick={() => { setSyncMethod("webhook"); setSyncSuccessResult(null); }}
+                                className={`py-1 rounded-md text-[10px] font-black transition cursor-pointer uppercase tracking-wider ${syncMethod === "webhook" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-slate-200"}`}
+                              >
+                                Webhook Automation
+                              </button>
+                            </div>
+
+                            {syncMethod === "gdrive" ? (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div className="space-y-1.5">
+                                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Google Client ID</label>
+                                  <input
+                                    type="text"
+                                    value={googleClientId}
+                                    onChange={(e) => setGoogleClientId(e.target.value)}
+                                    className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono text-slate-200 focus:outline-hidden focus:border-indigo-500 transition placeholder:text-slate-700"
+                                    placeholder="Enter client ID"
+                                  />
+                                </div>
+                                <div className="space-y-1.5">
+                                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 font-sans">Tên Thư Mục Lưu Trữ</label>
+                                  <input
+                                    type="text"
+                                    value={googleFolderId}
+                                    placeholder="AI Brand Strategy Hub"
+                                    onChange={(e) => setGoogleFolderId(e.target.value)}
+                                    className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-300 focus:outline-hidden focus:border-indigo-500 transition"
+                                  />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="space-y-1.5">
+                                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Automation Webhook URL</label>
+                                <input
+                                  type="text"
+                                  value={webhookUrl}
+                                  placeholder="https://hook.us1.make.com/... hoặc Zapier link"
+                                  onChange={(e) => setWebhookUrl(e.target.value)}
+                                  className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs text-slate-300 focus:outline-hidden focus:border-indigo-500 transition"
+                                />
+                              </div>
+                            )}
+                          </motion.div>
+                        )}
+
+                      </div>
+
+                      {/* Setup Tutorials Quick guide sidebar */}
+                      <div className="bg-slate-950/80 p-5 rounded-xl border border-slate-850 space-y-4">
+                        <div className="flex items-center gap-2 pb-2.5 border-b border-slate-850">
+                          <Settings className="w-4 h-4 text-indigo-400" />
+                          <h5 className="font-extrabold text-slate-200 text-xs uppercase tracking-wider">HƯỚNG DẪN LIÊN KẾT DRIVE</h5>
+                        </div>
+
+                        {syncMethod === "gdrive" ? (
+                          <div className="space-y-3.5 text-[11px] leading-relaxed text-slate-400 font-medium font-sans">
+                            <div className="space-y-1">
+                              <strong className="text-slate-100 block">1. Tạo Credentials Google OAuth</strong>
+                              <p>Vào <strong>console.cloud.google.com</strong> &rarr; Credentials &rarr; Create Credentials &rarr; Chọn <strong>OAuth client ID</strong> &rarr; Chọn <strong>Web application</strong>.</p>
+                            </div>
+                            <div className="space-y-1">
+                              <strong className="text-slate-100 block">2. Thêm Authorized JavaScript origin</strong>
+                              <p>Tại mục 'Authorized JavaScript origins', thêm địa chỉ ứng dụng: <code>{window.location.origin}</code>.</p>
+                            </div>
+                            <div className="space-y-1">
+                              <strong className="text-slate-100 block">3. Lưu &amp; Xác thực một lần</strong>
+                              <p>Sao chép Client ID dán vào ô thiết lập. Sau đó bạn có thể đóng bộ 1-click lên Drive cực kỳ bảo mật và dễ dàng!</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-3.5 text-[11px] leading-relaxed text-slate-400 font-medium font-sans">
+                            <div className="space-y-1">
+                              <strong className="text-slate-100 block">1. Tạo Webhook</strong>
+                              <p>Tạo Custom Webhook trong Make.com (hoặc Zapier) để nhận tệp gửi lên.</p>
+                            </div>
+                            <div className="space-y-1">
+                              <strong className="text-slate-100 block">2. Đẩy file tự động</strong>
+                              <p>Payload JSON gửi đi chứa <code>filename</code> và <code>fileBase64</code>. Thiết lập action của Make để lưu tệp lên Drive của bạn.</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+
 
                 {/* Paper blueprint showcase matches reference styling beautifully */}
                 <div id="capture-blueprint-master" className="bg-white p-6 sm:p-9 rounded-2xl border border-slate-200 shadow-sm space-y-8 print:border-none print:shadow-none font-sans">

@@ -385,6 +385,64 @@ app.use(express.json({ limit: "15mb" }));
     }
   });
 
+  // API endpoint for syncing files / Dispatching to Google Drive Automation Webhooks
+  app.post("/api/gdrive-sync", async (req, res) => {
+    try {
+      const { syncMethod, fileBase64, filename, webhookUrl } = req.body;
+      
+      if (!syncMethod || !fileBase64 || !filename) {
+        return res.status(400).json({ error: "Thiếu thông tin đồng bộ (syncMethod, fileBase64 hoặc filename)." });
+      }
+
+      if (syncMethod === "webhook") {
+        if (!webhookUrl) {
+          return res.status(400).json({ error: "Thiếu địa chỉ Webhook trigger URL." });
+        }
+
+        console.log("Google Drive Sync: Dispatching to webhook URL:", webhookUrl);
+        const webhookRes = await fetch(webhookUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            filename,
+            fileData: fileBase64,
+            source: "AI-Brand-Strategy-Hub",
+            timestamp: new Date().toISOString()
+          }),
+        });
+
+        if (!webhookRes.ok) {
+          const errMsg = await webhookRes.text();
+          return res.status(500).json({ 
+            error: `Kích hoạt Webhook thất bại (${webhookRes.status}). Chi tiết: ${errMsg.substring(0, 200)}` 
+          });
+        }
+
+        let linkUrl = "";
+        try {
+          const resData: any = await webhookRes.json();
+          linkUrl = resData.link || resData.url || resData.webUrl || resData.webViewLink || "";
+        } catch (_) {
+          // If no JSON was returned, that's okay, since webhooks can return text/plain or empty
+        }
+
+        return res.json({
+          status: "success",
+          webUrl: linkUrl || null,
+          message: "Kích hoạt Webhook thành công! Quá trình tự động đang đẩy tập tin lên Google Drive của bạn."
+        });
+      } else {
+        return res.status(400).json({ error: "Phương thức đồng bộ không hợp lệ." });
+      }
+
+    } catch (err: any) {
+      console.error("Critical error in /api/gdrive-sync:", err);
+      res.status(500).json({ error: err?.message || "Đã xảy ra lỗi nghiêm trọng khi đồng bộ." });
+    }
+  });
+
   // API endpoint for generating a product concept image mock-up using gemini-2.5-flash-image
   app.post("/api/generate-image", async (req, res) => {
     try {
