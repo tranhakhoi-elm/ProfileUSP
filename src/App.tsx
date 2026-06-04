@@ -92,6 +92,118 @@ export default function App() {
     }
   };
 
+  const parseTextToTable = (text: string, title: string = "Mô tả đã dán"): ParsedSheet => {
+    const lines = text.split(/\r?\n/);
+    const rows: string[][] = [];
+    
+    // Let's check if the text contains tabs (Excel/Sheet copy-paste)
+    const hasTabs = text.includes("\t");
+    
+    if (hasTabs) {
+      for (const l of lines) {
+        if (!l.trim()) continue;
+        const cells = l.split("\t").map(c => c.trim());
+        rows.push(cells);
+      }
+    } else {
+      // Single column or bullet points or key-value format
+      // Let's check if it has colons (e.g., "Thương hiệu: Elmich")
+      let colonCount = 0;
+      const splitLines = lines.filter(l => l.trim().length > 0);
+      for (const l of splitLines) {
+        if (l.includes(":") && !l.startsWith("http") && !l.startsWith("-") && !l.startsWith("+")) {
+          colonCount++;
+        }
+      }
+      
+      const isKeyValue = colonCount > splitLines.length * 0.25; // at least 25% are key-value
+      
+      if (isKeyValue) {
+        rows.push(["Thuộc tính / Tiêu đề", "Giá trị mô tả"]);
+        for (const l of splitLines) {
+          const idx = l.indexOf(":");
+          if (idx > 0 && !l.startsWith("http") && !l.startsWith("-") && !l.startsWith("+")) {
+            const key = l.substring(0, idx).trim();
+            const val = l.substring(idx + 1).trim();
+            rows.push([key, val]);
+          } else {
+            rows.push(["Tính năng / Chi tiết", l.trim()]);
+          }
+        }
+      } else {
+        // Flat list of values, like in the second screenshot.
+        // Let's present it as a clean list table with STT and Content columns.
+        rows.push(["Dòng", "Chi tiết kỹ thuật"]);
+        let stt = 1;
+        for (const l of splitLines) {
+          rows.push([`${stt++}`, l.trim()]);
+        }
+      }
+    }
+    
+    return {
+      name: title,
+      rows: rows
+    };
+  };
+
+  const handleExtractTableFromDescription = (customText?: string) => {
+    const textToParse = customText !== undefined ? customText : productDescription;
+    if (!textToParse.trim()) return;
+    const newSheet = parseTextToTable(textToParse, "Bảng từ mô tả dán");
+    
+    // Filter out existing "Bảng từ mô tả dán" to avoid duplicates
+    setParsedSheets((prev) => {
+      const filtered = prev.filter((s) => s.name !== "Bảng từ mô tả dán");
+      return [...filtered, newSheet];
+    });
+
+    // Automatically setting active sheet index to the newly created one
+    setTimeout(() => {
+      setParsedSheets((current) => {
+        const idx = current.findIndex((s) => s.name === "Bảng từ mô tả dán");
+        if (idx >= 0) {
+          setActiveParsedSheetIndex(idx);
+        }
+        return current;
+      });
+    }, 80);
+
+    // Also auto-detect name if empty
+    handleDetectNameFromDescription(textToParse);
+  };
+
+  const handleDetectNameFromDescription = (customText?: string) => {
+    const textToParse = customText !== undefined ? customText : productDescription;
+    if (!textToParse.trim()) return;
+    
+    // Don't overwrite if product name is already a real one and not default placeholder
+    const currentNameClean = productName ? productName.trim() : "";
+    if (currentNameClean && currentNameClean !== "") {
+      return;
+    }
+
+    const lines = textToParse.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length > 0) {
+      // First line is usually the product title! Especially in the provided Excel copy-paste image.
+      const firstLine = lines[0];
+      if (firstLine.length < 150 && !firstLine.startsWith("-") && !firstLine.startsWith("*") && !firstLine.startsWith("+")) {
+        // Clean any weird prefixes
+        let cleaned = firstLine
+          .replace(/^[:"'\-\s]+/, "")
+          .replace(/[:"'\-\s]+$/, "")
+          .trim();
+        if (cleaned) {
+          const capitalized = cleaned
+            .split(" ")
+            .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(" ");
+          setProductName(capitalized);
+        }
+      }
+    }
+  };
+
   const handleDropText = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1057,12 +1169,59 @@ export default function App() {
                           id="input-prod-desc"
                           rows={6}
                           value={productDescription}
-                          onChange={(e) => setProductDescription(e.target.value)}
-                          placeholder="Mô tả kỹ lưỡng công dụng lý tính, quy cách bảo hành, tính năng nổi bật vượt trội hơn đối thủ, hoặc phản hồi tích cực từng người dùng trước đó để AI chiết tách chuẩn phong vị nhất định..."
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setProductDescription(val);
+                            
+                            // Auto detect name if empty
+                            if (val.trim()) {
+                              handleDetectNameFromDescription(val);
+                              
+                              // If it contains multiple tabs, it is likely copied from Excel. Auto parse it for flawless UX!
+                              if (val.includes("\t") && val.trim().length > 15) {
+                                const newSheet = parseTextToTable(val, "Bảng từ mô tả dán");
+                                setParsedSheets((prev) => {
+                                  const filtered = prev.filter((s) => s.name !== "Bảng từ mô tả dán");
+                                  return [...filtered, newSheet];
+                                });
+                              }
+                            }
+                          }}
+                          placeholder="Mô tả kỹ lưỡng công dụng lý tính, hoặc dán trực tiếp dòng dữ liệu copy từ Excel/bảng biểu như trong ảnh của bạn. AI sẽ biến tất cả thành bảng dữ liệu chuyên nghiệp..."
                           className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 text-sm text-slate-800 placeholder-slate-400 font-sans leading-relaxed transition duration-150"
                         />
-                        <div className="text-right text-[10px] text-slate-400 font-medium font-sans">
-                          {productDescription.length} ký tự
+                        
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-2 font-sans select-none pb-2">
+                          <div className="text-[10px] text-slate-400 font-medium font-mono whitespace-nowrap">
+                            {productDescription.length} ký tự
+                          </div>
+                          
+                          {productDescription.trim().length > 5 && (
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleExtractTableFromDescription()}
+                                className="inline-flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-blue-200 transition-all cursor-pointer shadow-xxs active:scale-95"
+                                title="Chuyển đổi thông tin dán thô, danh sách dòng, hoặc bảng biểu thành Bảng dữ liệu chuẩn"
+                              >
+                                <Sparkles className="w-3.5 h-3.5 animate-pulse text-blue-600" />
+                                <span>⚡ Trích xuất thành bảng dữ liệu</span>
+                              </button>
+                              
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setProductName("");
+                                  setTimeout(() => handleDetectNameFromDescription(), 50);
+                                }}
+                                className="inline-flex items-center gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition-all cursor-pointer shadow-xxs active:scale-95"
+                                title="Tự động trích lọc và định danh Tên sản phẩm từ mô tả"
+                              >
+                                <FileText className="w-3.5 h-3.5 text-slate-500" />
+                                <span>🔍 Tìm Tên sản phẩm</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
 
