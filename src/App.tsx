@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import * as XLSX from "xlsx";
 import {
@@ -38,6 +38,11 @@ import { CriteriaAnalysisItem, CustomerPersona, PainPointUSP, ProductInput, Fina
 export default function App() {
   // Wizard States
   const [currentStep, setCurrentStep] = useState<number>(1);
+  
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [currentStep]);
+
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1837,9 +1842,26 @@ export default function App() {
                     return (
                       <div
                         key={item.id}
-                        className={`bg-white rounded-2xl border transition-all duration-200 overflow-hidden ${
-                          isSelected ? "border-blue-600 ring-2 ring-blue-500/10 shadow-sm" : "border-slate-200 shadow-xxs"
+                        onClick={(e) => {
+                          const target = e.target as HTMLElement;
+                          if (
+                            target.closest("button") || 
+                            target.closest("input") || 
+                            target.closest("textarea") || 
+                            target.closest("label") ||
+                            target.closest("a") ||
+                            isEditing
+                          ) {
+                            return;
+                          }
+                          toggleSelectUsp(item.id);
+                        }}
+                        className={`bg-white rounded-2xl border transition-all duration-200 overflow-hidden cursor-pointer ${
+                          isSelected 
+                            ? "border-blue-600 ring-4 ring-blue-500/10 shadow-sm bg-blue-50/5" 
+                            : "border-slate-200 hover:border-blue-400 hover:shadow-xs shadow-xxs"
                         } ${isEditing ? "bg-slate-50/55" : ""}`}
+                        title={isEditing ? "" : `Nhấp vào toàn bộ thẻ để chọn/bỏ chọn Cặp USP #${index + 1}`}
                       >
                         {/* Sub-header card title bar based on mockup styling */}
                         <div className="bg-slate-50 px-5 py-3 border-b border-slate-150 flex items-center justify-between">
