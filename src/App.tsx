@@ -48,6 +48,10 @@ export default function App() {
   
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
+    const mainEl = document.querySelector("main");
+    if (mainEl) {
+      mainEl.scrollTo({ top: 0, behavior: "smooth" });
+    }
   }, [currentStep]);
 
   const [loading, setLoading] = useState<boolean>(false);
@@ -232,36 +236,133 @@ export default function App() {
       });
     }, 80);
 
-    // Also auto-detect name if empty
+    // Also auto-detect name & code if empty/generic
     handleDetectNameFromDescription(textToParse);
+    handleDetectCodeFromDescription(textToParse);
   };
 
   const handleDetectNameFromDescription = (customText?: string) => {
     const textToParse = customText !== undefined ? customText : productDescription;
     if (!textToParse.trim()) return;
-    
-    // Don't overwrite if product name is already a real one and not default placeholder
-    const currentNameClean = productName ? productName.trim() : "";
-    if (currentNameClean && currentNameClean !== "") {
-      return;
-    }
 
     const lines = textToParse.split("\n").map(l => l.trim()).filter(l => l.length > 0);
     if (lines.length > 0) {
-      // First line is usually the product title! Especially in the provided Excel copy-paste image.
-      const firstLine = lines[0];
-      if (firstLine.length < 150 && !firstLine.startsWith("-") && !firstLine.startsWith("*") && !firstLine.startsWith("+")) {
-        // Clean any weird prefixes
-        let cleaned = firstLine
+      // 1. Detect Product Name
+      let nameFound = "";
+      let hasExplicitLabels = false;
+
+      // Look for common labels for name: "Tên sản phẩm: ...", "Sản phẩm: ...", "Tên dịch vụ: ...", "Product Name: ..."
+      // We must avoid matching "Mã sản phẩm", "Mã SP", "Product Code", "Model", etc.
+      const nameLabelRegex = /(?:Tên\s+sản\s+phẩm|Sản\s+phẩm|Tên\s+dịch\s+vụ|Tên\s+dự\s+án|Product\s+Name|Product)\s*[:=]\s*([^\n\r\|,\t]+)/i;
+      for (const line of lines) {
+        // Protective check: skip lines displaying model/code terms
+        if (/mã|code|model|sku|msp/i.test(line)) {
+          continue;
+        }
+        const m = line.match(nameLabelRegex);
+        if (m && m[1]) {
+          nameFound = m[1].trim();
+          hasExplicitLabels = true;
+          break;
+        }
+      }
+
+      // If they pasted a single line of text or a very short text, treat it as potential name
+      if (!nameFound && lines.length === 1 && textToParse.trim().length > 3 && textToParse.trim().length < 60) {
+        nameFound = textToParse.trim();
+      }
+
+      // If not found with label, and current productName is empty or generic, take the first non-trivial line
+      const currentNameClean = productName ? productName.trim() : "";
+      const isNameGeneric = !currentNameClean || currentNameClean === "" || currentNameClean === "N/A" || currentNameClean.toLowerCase().includes("ví dụ") || currentNameClean.toLowerCase().includes("untitled") || currentNameClean === "Sản phẩm mới";
+      
+      if (!nameFound && isNameGeneric) {
+        for (const line of lines) {
+          if (/mã|code|model|sku|msp/i.test(line)) {
+            continue;
+          }
+          if (line.length < 100 && line.length > 2 && !line.startsWith("-") && !line.startsWith("*") && !line.startsWith("+")) {
+            nameFound = line;
+            break;
+          }
+        }
+      }
+
+      // If we found a name, let's update it!
+      if (nameFound && (hasExplicitLabels || isNameGeneric || lines.length === 1)) {
+        // Check if there is a parenthesized/bracketed code within the name, e.g. "PureFlow 3000 [PF-3000]"
+        const bracketRegex = /\s*[\[\(\{\【]\s*([A-Za-z0-9_\-\s]{2,15})\s*[\]\)\}\】]/;
+        const bracketMatch = nameFound.match(bracketRegex);
+        let extractedCodeExt = "";
+        if (bracketMatch && bracketMatch[1]) {
+          extractedCodeExt = bracketMatch[1].trim();
+          nameFound = nameFound.replace(bracketRegex, "").trim();
+        }
+
+        let cleaned = nameFound
           .replace(/^[:"'\-\s]+/, "")
           .replace(/[:"'\-\s]+$/, "")
           .trim();
+        
         if (cleaned) {
           const capitalized = cleaned
             .split(" ")
             .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
             .join(" ");
-          setProductName(capitalized);
+          if (capitalized !== productName) {
+            setProductName(capitalized);
+          }
+          
+          if (extractedCodeExt && (!productCode || productCode === "" || productCode === "N/A" || productCode === "PROD")) {
+            setProductCode(extractedCodeExt.toUpperCase());
+          }
+        }
+      }
+    }
+  };
+
+  const handleDetectCodeFromDescription = (customText?: string) => {
+    const textToParse = customText !== undefined ? customText : productDescription;
+    if (!textToParse.trim()) return;
+
+    const lines = textToParse.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length > 0) {
+      let codeFound = "";
+      let hasExplicitCodeLabel = false;
+      
+      const codeLabelRegex = /(?:Mã\s+sản\s+phẩm|Mã\s+SP|MSP|Mã\s+hàng|Mã\s+dịch\s+vụ|Model|Code|Product\s+Code|SKU|Mã)\s*[:=]\s*([A-Za-z0-9_\-\.\/]+)/i;
+      for (const line of lines) {
+        const m = line.match(codeLabelRegex);
+        if (m && m[1]) {
+          codeFound = m[1].trim();
+          hasExplicitCodeLabel = true;
+          break;
+        }
+      }
+
+      // If no labeled code matched, look for common short uppercase alphanumeric codes inside brackets
+      if (!codeFound) {
+        const fullBracketMatch = textToParse.match(/[\[\(\{\【]\s*([A-Za-z0-9_\-]{3,15})\s*[\]\)\}\】]/);
+        if (fullBracketMatch && fullBracketMatch[1]) {
+          codeFound = fullBracketMatch[1].trim();
+        }
+      }
+
+      // Or a pattern like PF-3000, SP-100, etc.
+      if (!codeFound) {
+        const patternMatch = textToParse.match(/\b([A-Z]{2,5}[-_][0-9]{3,5})\b/) || textToParse.match(/\b([A-Z0-9]{3,12}[-_][A-Z0-9]{3,12})\b/);
+        if (patternMatch && patternMatch[1]) {
+          codeFound = patternMatch[1].trim();
+        }
+      }
+
+      const currentCodeClean = productCode ? productCode.trim() : "";
+      const isCodeGeneric = !currentCodeClean || currentCodeClean === "" || currentCodeClean === "N/A" || currentCodeClean.toLowerCase().includes("ví dụ") || currentCodeClean === "PROD";
+
+      if (codeFound && codeFound.length > 1 && (hasExplicitCodeLabel || isCodeGeneric)) {
+        const upperCode = codeFound.toUpperCase();
+        if (upperCode !== productCode) {
+          setProductCode(upperCode);
         }
       }
     }
@@ -279,14 +380,7 @@ export default function App() {
   };
 
   const runAutoDetection = (fileName: string, parsedText: string, sheets?: ParsedSheet[]) => {
-    // If user has already entered a custom product name, don't overwrite
-    const currentNameClean = productName ? productName.trim() : "";
-    if (currentNameClean && currentNameClean !== "" && currentNameClean !== "N/A") {
-      return;
-    }
-
-    let detected = "";
-
+    let detectedName = "";
     const cleanName = (val: string) => {
       return val
         .replace(/[:"'\-\s]+$/, "")
@@ -298,17 +392,20 @@ export default function App() {
     const lines = parsedText.split("\n");
     const labelRegex = /(?:Tên sản phẩm|Sản phẩm|Tên dự án|Product Name|Product|Dự án)\s*[:=]\s*([^\n\r]+)/i;
     for (const line of lines) {
+      if (/mã|code|model|sku|msp/i.test(line)) {
+        continue;
+      }
       const match = line.match(labelRegex);
       if (match && match[1]) {
-        detected = cleanName(match[1]);
-        if (detected && detected.length > 1) {
+        detectedName = cleanName(match[1]);
+        if (detectedName && detectedName.length > 1) {
           break;
         }
       }
     }
 
-    // Heuristics 2: If Excel sheets exist, look at top cells
-    if (!detected && sheets && sheets.length > 0) {
+    // Heuristics 2: If Excel sheets exist, look at top cells for product name label
+    if (!detectedName && sheets && sheets.length > 0) {
       for (const sheet of sheets) {
         const rows = sheet.rows.slice(0, 15);
         for (const row of rows) {
@@ -316,19 +413,19 @@ export default function App() {
             const cellVal = row[i]?.trim();
             if (cellVal && /^(?:Tên sản phẩm|Sản phẩm|Tên dự án|Product Name|Product|Dự án)$/i.test(cellVal.replace(/[:=]$/, "").trim())) {
               if (row[i + 1]) {
-                detected = cleanName(row[i + 1]);
+                detectedName = cleanName(row[i + 1]);
                 break;
               }
             }
           }
-          if (detected) break;
+          if (detectedName) break;
         }
-        if (detected) break;
+        if (detectedName) break;
       }
     }
 
     // Heuristics 3: Extract from file name and clean up meta tags
-    if (!detected) {
+    if (!detectedName) {
       let nameNoExt = fileName.substring(0, fileName.lastIndexOf('.')) || fileName;
       nameNoExt = nameNoExt
         .replace(/^(?:Thong_tin_san_pham|thong_tin_san_pham|master_file|Master_File|data|report|tailieu|tai_lieu|thongtin|thong_tin|product|project|du_an|duan)[_\-\s]*/i, "")
@@ -338,17 +435,71 @@ export default function App() {
       // Convert CamelCase to spaced
       nameNoExt = nameNoExt.replace(/([a-z])([A-Z])/g, "$1 $2");
       if (nameNoExt && nameNoExt.length > 2) {
-        detected = nameNoExt;
+        detectedName = nameNoExt;
       }
     }
 
-    if (detected) {
+    if (detectedName) {
       // Title Case capitalizing
-      const prettyName = detected
+      const prettyName = detectedName
         .split(" ")
         .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
         .join(" ");
       setProductName(prettyName);
+    }
+
+    // 2. Detect Product Code
+    let detectedCode = "";
+
+    // Heuristics A: Check files lines for a Product Code label
+    const codeLabelRegex = /(?:Mã\s+sản\s+phẩm|Mã\s+SP|MSP|Mã\s+hàng|Mã\s+dịch\s+vụ|Model|Code|Product\s+Code|SKU|Mã)\s*[:=]\s*([A-Za-z0-9_\-\.\/]+)/i;
+    for (const line of lines) {
+      const match = line.match(codeLabelRegex);
+      if (match && match[1]) {
+        detectedCode = match[1].trim().toUpperCase();
+        if (detectedCode.length > 1) {
+          break;
+        }
+      }
+    }
+
+    // Heuristics B: If Excel sheets exist, search cells for product code label
+    if (!detectedCode && sheets && sheets.length > 0) {
+      for (const sheet of sheets) {
+        const rows = sheet.rows.slice(0, 15);
+        for (const row of rows) {
+          for (let i = 0; i < row.length; i++) {
+            const cellVal = row[i]?.trim();
+            if (cellVal && /^(?:Mã sản phẩm|Mã SP|MSP|Mã hàng|Model|Code|Product Code|SKU|Mã)$/i.test(cellVal.replace(/[:=]$/, "").trim())) {
+              if (row[i + 1]) {
+                detectedCode = row[i + 1].trim().toUpperCase();
+                break;
+              }
+            }
+          }
+          if (detectedCode) break;
+        }
+        if (detectedCode) break;
+      }
+    }
+
+    // Heuristics C: Look for bracketed codes or patterns in the file name or within cells of the sheet
+    if (!detectedCode) {
+      const bracketMatch = parsedText.match(/[\[\(\{\【]\s*([A-Za-z0-9_\-]{3,15})\s*[\]\)\}\】]/);
+      if (bracketMatch && bracketMatch[1]) {
+        detectedCode = bracketMatch[1].trim().toUpperCase();
+      }
+    }
+
+    if (!detectedCode) {
+      const patternMatch = parsedText.match(/\b([A-Z]{2,5}[-_][0-9]{3,5})\b/) || parsedText.match(/\b([A-Z0-9]{3,12}[-_][A-Z0-9]{3,12})\b/);
+      if (patternMatch && patternMatch[1]) {
+        detectedCode = patternMatch[1].trim().toUpperCase();
+      }
+    }
+
+    if (detectedCode) {
+      setProductCode(detectedCode);
     }
   };
 
@@ -789,24 +940,20 @@ export default function App() {
     // Create a new workbook
     const wb = XLSX.utils.book_new();
 
-    // Sheet 1: THUONG HEU & USP CAP (General Overview)
+    // -------------------------------------------------------------
+    // SHEET 1: THÔNG TIN SẢN PHẨM & CÁC CẶP USP ĐUYỆT CHỌN
+    // -------------------------------------------------------------
     const sheet1Data: any[][] = [
-      ["BẢN PHÊ DUYỆT FILE MASTER ĐỊNH VỊ THƯƠNG HIỆU & HỆ THỐNG USP CỐT LÕI (AI POWER) "],
-      [`Xuất bản ngày: ${new Date().toLocaleDateString("vi-VN")} lúc ${new Date().toLocaleTimeString("vi-VN")}`],
+      ["BÁO CÁO THÔNG TIN CHI TIẾT SẢN PHẨM & HỆ THỐNG CÁC GIẢI PHÁP USP ĐẶC ĐỊNH ĐÃ PHÊ DUYỆT"],
+      [`Xuất bản từ AI Brand Strategy Hub | Ngày tạo: ${new Date().toLocaleDateString("vi-VN")} lúc ${new Date().toLocaleTimeString("vi-VN")}`],
       [],
-      ["I. THÔNG TIN SẢN PHẨM & DỰ ÁN"],
-      ["Tên sản phẩm:", productName],
-      ["Mô tả kỹ thuật & Giải pháp cốt lõi:", productDescription],
+      ["I. THÔNG TIN CHUNG SẢN PHẨM & DỰ ÁN MARKETING CỐT LÕI"],
+      ["Tên sản phẩm:", productName || "N/A"],
+      ["Mã sản phẩm / Dự án:", productCode || "N/A"],
+      ["Mô tả kỹ thuật & Giải pháp cốt lõi của sản phẩm:", productDescription || "N/A"],
       [],
-      ["II. TIÊU ĐIỂM CHÂN DUNG KHÁCH HÀNG MỤC TIÊU (SELECTED PERSONA)"],
-      ["Danh xưng nhóm khách hàng lý tưởng:", chosenPersona?.name || "N/A"],
-      ["Giải mã Nhân khẩu học & Hành vi:", chosenPersona?.demographics || "N/A"],
-      ["Nỗi bức xúc cốt lõi / Nỗi đau sâu thẳm:", chosenPersona?.painPoints || "N/A"],
-      ["Xúc cảm, lợi ích mong muốn vượt bực:", chosenPersona?.benefits || "N/A"],
-      ["Tâm niệm thầm kín tự quy định:", chosenPersona?.summary || "N/A"],
-      [],
-      ["III. 5 CẶP GIẢI PHÁP & USP ĐÃ LỰA CHỌN TRONG CHIẾN DỊCH"],
-      ["STT", "Nỗi lo lắng / Nỗi đau khách hàng", "Định vị / Giải pháp USP tương đương", "Chi tiết chuyển đổi / Kịch bản thông điệp"]
+      ["II. DANH SÁCH CÁC CẶP GIẢI PHÁP / USP VƯỢT TRỘI ĐÃ LỰA CHỌN TRONG CHIẾN DỊCH BÀN GIAO"],
+      ["STT", "Nỗi lo lắng / Nỗi đau khách hàng (Pain Point)", "Định vị / Giải pháp USP tương ứng (Unique Selling Proposition)", "Chi tiết chuyển đổi / Kịch bản thông điệp truyền thông"]
     ];
 
     const chosenUsps = getSelectedUspObjects();
@@ -821,31 +968,69 @@ export default function App() {
 
     const ws1 = XLSX.utils.aoa_to_sheet(sheet1Data);
     ws1["!cols"] = [
-      { wch: 30 }, // Cột tiêu đề danh mục
-      { wch: 45 }, // Cột nội dung chính 1
-      { wch: 45 }, // Cột nội dung chính 2
-      { wch: 55 }  // Cột nội dung chính 3
+      { wch: 32 }, // Cột tiêu đề danh mục / STT
+      { wch: 55 }, // Nỗi lo lắng / Pain Point
+      { wch: 55 }, // Định vị USP tương ứng
+      { wch: 65 }  // Chi tiết kịch bản thông điệp
     ];
 
-    // Sheet 2: MA TRAN MARKETING 8 COT (8-Column Matrix Table)
+    // Merges for Sheet 1 to create professional hierarchy headers
+    ws1["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } }, // Title banner
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 3 } }, // Date metadata
+      { s: { r: 3, c: 0 }, e: { r: 3, c: 3 } }, // Header section I
+      { s: { r: 8, c: 0 }, e: { r: 8, c: 3 } }  // Header section II
+    ];
+
+    // -------------------------------------------------------------
+    // SHEET 2: CHÂN DUNG KHÁCH HÀNG MỤC TIÊU
+    // -------------------------------------------------------------
     const sheet2Data: any[][] = [
-      ["ĐẠI MA TRẬN MARKETING 8 BƯỚC CHI TIẾT - PHÂN TÍCH TÂM LÝ & BÀN GIAO TRUYỀN THÔNG"],
-      [`Chiến dịch sản phẩm: ${productName}`],
+      ["HỒ SƠ CHÂN DUNG KHÁCH HÀNG LÝ TƯỞNG & ĐỊNH VỊ TÂM LÝ SÂU SẮC (TARGET PERSONA SURVEY)"],
+      [`Chiến dịch: ${productName} (Mã: ${productCode || "PROD"}) | Xuất xứ: AI Brand Strategy Hub`],
+      [],
+      ["ĐỊNH DANH DANH MỤC PHÂN TÍCH", "GIẢI MÃ CHÂN DUNG CHI TIẾT & INSIGHT SÂU SẮC CỦA KHÁCH HÀNG MỤC TIÊU"],
+      ["1. Danh xưng nhóm khách hàng lý tưởng (Persona Name)", chosenPersona?.name || "N/A"],
+      ["2. Giải mã Nhân khẩu học & Hành vi mua sắm", chosenPersona?.demographics || "N/A"],
+      ["3. Nỗi bức xúc cốt lõi / Nỗi đau sâu thẳm (Key Pain Point)", chosenPersona?.painPoints || "N/A"],
+      ["4. Xúc cảm mua sắm & Lợi ích kỳ vọng vượt bậc (Desire Benefits)", chosenPersona?.benefits || "N/A"],
+      ["5. Tâm niệm thầm kín tự quy định định mệnh (Deep Insight / Deep Mind)", chosenPersona?.summary || "N/A"]
+    ];
+
+    const ws2 = XLSX.utils.aoa_to_sheet(sheet2Data);
+    ws2["!cols"] = [
+      { wch: 45 }, // Cột danh mục định danh
+      { wch: 85 }  // Cột thông tin giải mã chi tiết
+    ];
+
+    // Merges for Sheet 2
+    ws2["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }, // Title banner
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 1 } }, // Subtitle
+      { s: { r: 3, c: 0 }, e: { r: 3, c: 1 } }  // Table category column header
+    ];
+
+    // -------------------------------------------------------------
+    // SHEET 3: BẢNG CHIẾN LƯỢC ĐỊNH VỊ (MA TRẬN ĐỊNH VỊ MARKETING 8 BƯỚC)
+    // -------------------------------------------------------------
+    const sheet3Data: any[][] = [
+      ["BẢNG CHIẾN LƯỢC ĐỊNH VỊ ĐẠI MA TRẬN MARKETING 8 BƯỚC CHI TIẾT - PHÂN TÍCH TÂM LÝ & BÀN GIAO TRUYỀN THÔNG"],
+      [`Ứng dụng chiến dịch: ${productName} (${productCode || "PROD"}) | Phục vụ phân bổ ngân sách kịch bản & thiết kế Key Visual`],
       [],
       [
         "STT",
         "Bước (Step)",
-        "Mục Tiêu Tâm Lý Cốt Lõi",
-        "Nỗi Đau & Kỳ Vọng Chi Phối",
-        "Các Bước Triển Khai Thực Tế (Kịch Bản)",
-        "USP Vượt Trội (Lợi ích khách hàng -> Thông Số Kỹ Thuật)",
-        "Tiêu Đề & Tiêu Đề Phụ Truyền Thông (Headline/Subheadline)",
-        "Ý Tưởng Hình Ảnh & Bối Cảnh Hiển Thị (Visual Key)"
+        "Mục Tiêu Tâm Lý",
+        "Nỗi Đau & Mong Muốn",
+        "Các bước triển khai chi tiết (Kịch bản hành động)",
+        "USP (Lợi ích khách hàng -> Thông số kỹ thuật cốt lõi)",
+        "Headline - Subheadline (Text nội dung hiển thị trên ảnh / video)",
+        "Minh họa hình ảnh (Mô tả Visual Key thiết kế & Bối cảnh hiển thị)"
       ]
     ];
 
     reportRows.forEach((row) => {
-      sheet2Data.push([
+      sheet3Data.push([
         row.stt ? row.stt.toString() : "",
         row.step || "",
         row.psychologicalGoal || "",
@@ -857,21 +1042,28 @@ export default function App() {
       ]);
     });
 
-    const ws2 = XLSX.utils.aoa_to_sheet(sheet2Data);
-    ws2["!cols"] = [
+    const ws3 = XLSX.utils.aoa_to_sheet(sheet3Data);
+    ws3["!cols"] = [
       { wch: 6 },   // STT
-      { wch: 22 },  // Bước (Step)
-      { wch: 30 },  // Mục Tiêu Tâm Lý
-      { wch: 40 },  // Nỗi Đau & Mong Muốn
-      { wch: 40 },  // Các bước
-      { wch: 45 },  // USP
-      { wch: 45 },  // Headline
-      { wch: 40 }   // Visual Key
+      { wch: 24 },  // Bước (Step)
+      { wch: 32 },  // Mục Tiêu Tâm Lý
+      { wch: 42 },  // Nỗi Đau & Mong Muốn
+      { wch: 45 },  // Các bước
+      { wch: 52 },  // USP
+      { wch: 52 },  // Headline
+      { wch: 45 }   // Visual Key
     ];
 
-    // Append sheets to workbook
-    XLSX.utils.book_append_sheet(wb, ws1, "1. Tong quan & USP");
-    XLSX.utils.book_append_sheet(wb, ws2, "2. Ma tran 8 Cot Chien dich");
+    // Merges for Sheet 3
+    ws3["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } }, // Title banner
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } }  // Strategy subtitle description
+    ];
+
+    // Append sheets in exact specified order to workbook
+    XLSX.utils.book_append_sheet(wb, ws1, "1. Thong tin San pham");
+    XLSX.utils.book_append_sheet(wb, ws2, "2. Chan dung Khach hang");
+    XLSX.utils.book_append_sheet(wb, ws3, "3. Chien luoc Dinh vi");
 
     return wb;
   };
@@ -1455,6 +1647,19 @@ export default function App() {
                                 <FileText className="w-3.5 h-3.5 text-slate-500" />
                                 <span>🔍 Tìm Tên sản phẩm</span>
                               </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setProductCode("");
+                                  setTimeout(() => handleDetectCodeFromDescription(), 50);
+                                }}
+                                className="inline-flex items-center gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 transition-all cursor-pointer shadow-xxs active:scale-95"
+                                title="Tự động trích lọc và định danh Mã sản phẩm từ mô tả"
+                              >
+                                <Key className="w-3.5 h-3.5 text-amber-500" />
+                                <span>🔑 Tìm Mã sản phẩm</span>
+                              </button>
                             </div>
                           )}
                         </div>
@@ -1511,7 +1716,7 @@ export default function App() {
                             {/* The Spreadsheet Table Component */}
                             {parsedSheets[activeParsedSheetIndex] && (
                               <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white max-h-[250px] overflow-y-auto custom-scrollbar shadow-xxs">
-                                <table className="min-w-full divide-y divide-slate-200 text-left border-collapse table-auto select-none font-sans">
+                                <table className="min-w-full divide-y divide-slate-200 text-left border-collapse table-auto select-text font-sans">
                                   <tbody className="divide-y divide-slate-200 divide-x divide-slate-100">
                                     {parsedSheets[activeParsedSheetIndex].rows
                                       .filter((row) => {
@@ -2023,7 +2228,7 @@ export default function App() {
                 className="space-y-6"
               >
                 {/* Floating summary tracker widget styled beautifully right at the top */}
-                <div className="sticky top-16 z-30 bg-white border border-slate-200 shadow-md p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="sticky top-0 z-30 bg-white border border-slate-200 shadow-md p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                   <div className="space-y-1">
                     <div className="flex items-center gap-1.5">
                       <Target className="w-5 h-5 text-blue-600 shrink-0" />
@@ -2248,14 +2453,6 @@ export default function App() {
                       <span className="text-[10px] bg-green-500 text-slate-950 font-black px-2.5 py-0.5 rounded-full uppercase tracking-widest block w-max">
                         TIẾN TRÌNH ĐÃ HOÀN TẤT
                       </span>
-                      {/* Hidden Admin Config tool icon */}
-                      <button 
-                        onClick={() => setShowSyncConfig(!showSyncConfig)}
-                        title="Cài đặt cấu hình Đồng bộ Google Drive"
-                        className="text-slate-500 hover:text-indigo-400 p-1 rounded-md transition cursor-pointer"
-                      >
-                        <Settings className="w-3.5 h-3.5 animate-spin" style={{ animationDuration: "12s" }} />
-                      </button>
                     </div>
                     <h3 className="text-lg sm:text-xl font-extrabold tracking-tight text-slate-100">
                       Bản Phê Duyệt File Master Độc Quyền USP
@@ -2267,107 +2464,21 @@ export default function App() {
 
                   <div className="flex flex-wrap items-center gap-2.5 z-10">
                     <button
-                      id="btn-copy-clipboard"
-                      onClick={handleCopyToClipboard}
-                      className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xxs"
-                    >
-                      {copySuccess ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4 text-slate-400" />}
-                      <span>{copySuccess ? "Đã sao chép!" : "Copy Báo Cáo"}</span>
-                    </button>
-
-                    <button
                       id="btn-download-csv"
                       onClick={handleDownloadCSV}
-                      className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-blue-500/20"
+                      className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-black flex items-center gap-2 transition duration-200 cursor-pointer shadow-lg shadow-blue-500/25 active:scale-95"
                     >
-                      <Download className="w-4 h-4" />
-                      <span>Xuất Excel/CSV</span>
-                    </button>
-
-                    <button
-                      id="btn-sync-gdrive"
-                      onClick={handleMainSyncClick}
-                      disabled={isSyncing}
-                      className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-800 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-indigo-500/20"
-                    >
-                      {isSyncing ? (
-                        <RefreshCw className="w-4 h-4 animate-spin text-indigo-300" />
-                      ) : (
-                        <Cloud className="w-4 h-4" />
-                      )}
-                      <span>{isSyncing ? "Đang đồng bộ..." : "Đồng bộ Google Drive"}</span>
-                    </button>
-
-                    <button
-                      id="btn-print"
-                      onClick={() => window.print()}
-                      className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xxs"
-                    >
-                      <Printer className="w-4 h-4 text-slate-400" />
-                      <span>In Bản Cứng</span>
+                      <Download className="w-5 h-5 text-blue-100" />
+                      <span>TẢI FILE EXCEL MASTER BÀN GIAO</span>
                     </button>
                   </div>
                 </div>
 
                 {/* Real-time Inline Sync Status Feedback Notification Block */}
-                {(isSyncing || syncSuccessResult || syncError) && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="p-5 rounded-2xl border print:hidden font-sans space-y-4 bg-slate-900 border-slate-800 text-white shadow-xl relative overflow-hidden"
-                  >
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-2xl pointer-events-none"></div>
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-start gap-3.5">
-                        <div className={`p-2.5 rounded-xl shrink-0 ${isSyncing ? 'bg-indigo-600 text-indigo-100 animate-spin' : syncError ? 'bg-red-950 text-red-400 border border-red-900/50' : 'bg-green-950 text-green-400 border border-green-900/50'}`}>
-                          {isSyncing ? <RefreshCw className="w-5 h-5" /> : syncError ? <AlertCircle className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
-                        </div>
-                        <div className="space-y-1">
-                          <h4 className="font-extrabold text-slate-100 text-sm tracking-tight uppercase">
-                            {isSyncing ? "Đang đẩy báo cáo lên Google Drive..." : syncError ? "Thiết lập hoặc truyền dữ liệu lỗi" : "Ứng dụng G-Drive đã hoàn thành!"}
-                          </h4>
-                          <p className="text-slate-400 text-xs font-medium leading-relaxed max-w-2xl">
-                            {isSyncing 
-                              ? "Vui lòng hoàn thành quá trình xác minh danh tính và cấp quyền nếu Google hiển thị popup đăng nhập. Tệp Sheets sẽ tự động mở sau khi hoàn tất..." 
-                              : syncError 
-                                ? syncError 
-                                : `Tập tin Master độc quyền USP của bạn đã được khởi tạo thành công trên thư mục Google Drive cố định. Trình duyệt đang tự động chuyển tiếp bạn tới trang.`}
-                          </p>
-                        </div>
-                      </div>
 
-                      {!isSyncing && (
-                        <button
-                          onClick={() => { setSyncSuccessResult(null); setSyncError(null); }}
-                          className="text-xs text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-750 p-1 px-2.5 rounded-md transition cursor-pointer"
-                        >
-                          Đóng
-                        </button>
-                      )}
-                    </div>
-
-                    {syncSuccessResult?.webUrl && (
-                      <div className="pt-2 flex flex-wrap items-center gap-3 border-t border-slate-800/80">
-                        <a
-                          href={syncSuccessResult.webUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center gap-2 transition shadow-lg shadow-indigo-500/20 animate-pulse hover:animate-none"
-                        >
-                          <Eye className="w-4 h-4 text-indigo-200" />
-                          <span>Mở xem trang tính trực tuyến (Google Sheets)</span>
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                        <p className="text-[10px] text-slate-500 font-semibold leading-normal font-sans">
-                          * Lưu ý: Nếu tab mới chưa được mở, hãy nhấp vào nút ở trên hoặc tắt chặn popup của trình duyệt.
-                        </p>
-                      </div>
-                    )}
-                  </motion.div>
-                )}
 
                 {/* Cloud Sync and Google Drive configuration Panel */}
-                {showSyncConfig && (
+                {false && showSyncConfig && (
                   <motion.div
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: "auto" }}
@@ -2734,8 +2845,8 @@ export default function App() {
                             <th className="w-[220px] px-3 py-3.5 text-left text-xs font-black text-slate-500 uppercase tracking-wider">Mục Tiêu Tâm Lý</th>
                             <th className="w-[260px] px-3 py-3.5 text-left text-xs font-black text-slate-500 uppercase tracking-wider">Nỗi Đau & Mong Muốn</th>
                             <th className="w-[260px] px-3 py-3.5 text-left text-xs font-black text-slate-500 uppercase tracking-wider">Các bước</th>
-                            <th className="w-[300px] px-3 py-3.5 text-left text-xs font-black text-slate-500 uppercase tracking-wider">{"USP (Lợi ích -> Tính năng)"}</th>
-                            <th className="w-[240px] px-3 py-3.5 text-left text-xs font-black text-slate-500 uppercase tracking-wider">Headline - Subheadline</th>
+                            <th className="w-[300px] px-3 py-3.5 text-left text-xs font-black text-slate-500 uppercase tracking-wider">{"USP (Lợi ích khách hàng -> Thông số kỹ thuật)"}</th>
+                            <th className="w-[240px] px-3 py-3.5 text-left text-xs font-black text-slate-500 uppercase tracking-wider">Headline - Subheadline (Text hiển thị trên ảnh)</th>
                             <th className="w-[250px] px-3 py-3.5 text-left text-xs font-black text-slate-500 uppercase tracking-wider">Minh họa hình ảnh (Visual Key)</th>
                           </tr>
                         </thead>

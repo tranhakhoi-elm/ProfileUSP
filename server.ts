@@ -34,6 +34,69 @@ function getGeminiClient(): GoogleGenAI {
   return aiInstance;
 }
 
+// Wrapper to automatically handle rate limits / free tier quotas (429 RESOURCE_EXHAUSTED)
+// with fallback models (gemini-3.5-flash -> gemini-3.1-flash-lite -> gemini-flash-latest)
+async function generateContentWithFallback(params: {
+  contents: any;
+  config?: any;
+  modelPreference?: string[];
+}): Promise<any> {
+  const client = getGeminiClient();
+  const modelsToTry = params.modelPreference || ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+  
+  let lastError: any = null;
+
+  for (const model of modelsToTry) {
+    try {
+      console.log(`[Gemini API] Attempting generation with model: ${model}`);
+      const modelConfig = params.config ? { ...params.config } : undefined;
+      // Strip thinkingConfig if the model does not start with gemini-3
+      if (modelConfig && modelConfig.thinkingConfig && !model.startsWith("gemini-3")) {
+        delete modelConfig.thinkingConfig;
+      }
+
+      const res = await client.models.generateContent({
+        contents: params.contents,
+        model: model,
+        config: modelConfig,
+      });
+      return res;
+    } catch (err: any) {
+      lastError = err;
+      const isQuotaError = 
+        err?.status === 429 || 
+        err?.statusCode === 429 ||
+        err?.message?.includes("RESOURCE_EXHAUSTED") ||
+        JSON.stringify(err)?.includes("RESOURCE_EXHAUSTED") ||
+        JSON.stringify(err)?.includes("quota");
+
+      if (isQuotaError) {
+        console.warn(`[Gemini API] Model ${model} rate-limited or quota exhausted. Trying next fallback...`);
+        continue;
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  // If all tried models failed with rate limit/quota, return a helpful friendly message
+  const isQuotaError = 
+    lastError?.status === 429 || 
+    lastError?.statusCode === 429 ||
+    lastError?.message?.includes("RESOURCE_EXHAUSTED") ||
+    JSON.stringify(lastError)?.includes("RESOURCE_EXHAUSTED") ||
+    JSON.stringify(lastError)?.includes("quota");
+
+  if (isQuotaError) {
+    throw new Error(
+      "Hệ thống hiện tại đã vượt quá giới hạn lượt yêu cầu miễn phí của Google Gemini (Quota Exceeded - 429). " +
+      "Vui lòng đợi khoảng 1 phút rồi thử lại, hoặc tự cấu hình phím API cá nhân (GEMINI_API_KEY) của riêng bạn trong Settings > Secrets để sử dụng không giới hạn."
+    );
+  }
+
+  throw lastError || new Error("Đã xảy ra lỗi không xác định khi gọi dịch vụ AI.");
+}
+
 const app = express();
 const PORT = 3000;
 
@@ -151,8 +214,7 @@ app.use(express.json({ limit: "15mb" }));
         });
       }
 
-      const response = await client.models.generateContent({
-        model: "gemini-3.5-flash",
+      const response = await generateContentWithFallback({
         contents: { parts: contents },
         config: {
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
@@ -261,8 +323,7 @@ app.use(express.json({ limit: "15mb" }));
         - description: Giải thích ngắn gọn cách thức sản phẩm mang lại giải pháp đó một cách tinh tế kèm một khẩu hiệu kêu gọi hoặc ví dụ trực quan.
       `;
 
-      const response = await client.models.generateContent({
-        model: "gemini-3.5-flash",
+      const response = await generateContentWithFallback({
         contents: promptText,
         config: {
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
@@ -343,8 +404,7 @@ app.use(express.json({ limit: "15mb" }));
         8. visualKey: Minh họa hình ảnh (Visual Key): Gợi ý phân cảnh chụp/vẽ hoặc bối cảnh hình ảnh trực quan thể hiện giá trị sản phẩm tốt nhất.
       `;
 
-      const response = await client.models.generateContent({
-          model: "gemini-3.5-flash",
+      const response = await generateContentWithFallback({
           contents: promptText,
           config: {
             thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
@@ -459,14 +519,14 @@ app.use(express.json({ limit: "15mb" }));
         Style: clean, hyper-modern, minimalist, elegant lighting, studio background, perfect color palette matching the product vibe. Underlined by professional commercial design principles. No messy texts or watermarks inside.
       `;
 
-      const response = await client.models.generateContent({
-        model: "gemini-2.5-flash-image",
+      const response = await generateContentWithFallback({
         contents: imagePrompt,
         config: {
           imageConfig: {
             aspectRatio: "1:1",
           },
         },
+        modelPreference: ["gemini-2.5-flash-image", "gemini-3.1-flash-image"],
       });
 
       let base64Image = "";
