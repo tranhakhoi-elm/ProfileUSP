@@ -6,6 +6,8 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import * as XLSX from "xlsx";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 import {
   Sparkles,
   UploadCloud,
@@ -95,6 +97,7 @@ export default function App() {
 
   // Export & Copy Success feedback
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
 
   // Step 5: Finalized report rows (8-column matrix from AI)
   const [reportRows, setReportRows] = useState<FinalMasterRow[]>([]);
@@ -1092,6 +1095,308 @@ export default function App() {
     const wb = generateXlsxWorkbook();
     const filename = `${getCustomFileName()}.xlsx`;
     XLSX.writeFile(wb, filename);
+  };
+
+  const handleDownloadPDF = async () => {
+    setIsGeneratingPdf(true);
+    try {
+      // 1. Initialize jsPDF in Landscape A4 mode
+      const doc = new jsPDF({
+        orientation: "l",
+        unit: "mm",
+        format: "a4"
+      });
+
+      // 2. Load Unicode Fonts for Vietnamese Support Dynamically to prevent layout breaks!
+      const regularFontUrl = "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf";
+      const mediumFontUrl = "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Medium.ttf";
+
+      const fetchFontBase64 = async (url: string): Promise<string> => {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("Thất bại khi tải font");
+        const blob = await res.blob();
+        return new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const dataUrl = reader.result as string;
+            resolve(dataUrl.split(",")[1]);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      };
+
+      let fontLoaded = false;
+      try {
+        const [regularBase64, mediumBase64] = await Promise.all([
+          fetchFontBase64(regularFontUrl),
+          fetchFontBase64(mediumFontUrl)
+        ]);
+
+        doc.addFileToVFS("Roboto-Regular.ttf", regularBase64);
+        doc.addFont("Roboto-Regular.ttf", "Roboto", "normal");
+
+        doc.addFileToVFS("Roboto-Medium.ttf", mediumBase64);
+        doc.addFont("Roboto-Medium.ttf", "Roboto", "bold");
+
+        doc.setFont("Roboto", "normal");
+        fontLoaded = true;
+      } catch (e) {
+        console.warn("Could not load Roboto font. Falling back to default system fonts.", e);
+        doc.setFont("helvetica", "normal");
+      }
+
+      const chosenPersona = editedPersona || (selectedPersonaIndex !== null ? personas[selectedPersonaIndex] : null);
+      const chosenUsps = getSelectedUspObjects();
+
+      // ==========================================
+      // PAGE 1: COVER PAGE / SẢN PHẨM & USP
+      // ==========================================
+      
+      // Page background decorative band
+      doc.setFillColor(15, 23, 42); // slate-900
+      doc.rect(0, 0, 297, 32, "F");
+
+      // Brand Logo Text left
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(14);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "bold");
+      doc.text("AI BRAND STRATEGY HUB", 15, 14);
+      
+      // Date info right
+      doc.setFontSize(9);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "normal");
+      doc.setTextColor(148, 163, 184); // slate-400
+      doc.text(`Ngày tạo: ${new Date().toLocaleDateString("vi-VN")} lúc ${new Date().toLocaleTimeString("vi-VN")}`, 282, 14, { align: "right" });
+
+      // Document Title banner
+      doc.setFontSize(16);
+      doc.setTextColor(255, 255, 255);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "bold");
+      doc.text("HỒ SƠ BÀN GIAO CHIẾN LƯỢC ĐỊNH VỊ THƯƠNG HIỆU & HỆ THỐNG USP SẢN PHẨM", 15, 24);
+
+      // Section I: THÔNG TIN SẢN PHẨM & DỰ ÁN
+      doc.setFillColor(248, 250, 252); // slate-50
+      doc.setDrawColor(226, 232, 240); // slate-200
+      doc.rect(15, 42, 267, 34, "FD");
+
+      doc.setFontSize(10.5);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "bold");
+      doc.setTextColor(37, 99, 235); // blue-600
+      doc.text("I. THÔNG TIN CHUNG SẢN PHẨM & DỰ ÁN THƯƠNG HIỆU TIÊU ĐIỂM", 20, 485 - 437); // adjusted Y
+
+      doc.setFontSize(9.5);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "bold");
+      doc.setTextColor(15, 23, 42); // slate-900
+      doc.text("Tên sản phẩm: ", 20, 54);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "normal");
+      doc.text(productName || "N/A", 48, 54);
+
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "bold");
+      doc.text("Mã dự án: ", 180, 54);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "normal");
+      doc.text(productCode || "N/A", 200, 54);
+
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "bold");
+      doc.text("Mô tả kỹ thuật/Cốt lõi: ", 20, 62);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "normal");
+      const descText = productDescription || "N/A";
+      const splitDesc = doc.splitTextToSize(descText, 210);
+      doc.text(splitDesc.slice(0, 2), 58, 62);
+
+      // List of Choose USPs table
+      doc.setFontSize(11);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "bold");
+      doc.setTextColor(15, 23, 42);
+      doc.text("II. DANH SÁCH 5 CẶP GIẢI PHÁP / USP ƯU VIỆT PHÊ DUYỆT", 15, 87);
+
+      const uspHeaders = [["STT", "Nỗi lo lắng / Nỗi đau khách hàng (Pain Point)", "Định vị / Giải pháp USP tương ứng (Unique Selling Proposition)", "Chi tiết chuyển đổi / Kịch bản thông điệp"]];
+      const uspBody = chosenUsps.map((item, idx) => [
+        (idx + 1).toString(),
+        item.painPoint || "N/A",
+        item.usp || "N/A",
+        item.description || "N/A"
+      ]);
+
+      autoTable(doc, {
+        head: uspHeaders,
+        body: uspBody,
+        startY: 92,
+        margin: { left: 15, right: 15 },
+        styles: {
+          font: fontLoaded ? "Roboto" : "helvetica",
+          fontSize: 8.5,
+          cellPadding: 3
+        },
+        headStyles: {
+          fillColor: [37, 99, 235], // blue-600
+          textColor: [255, 255, 255],
+          fontStyle: "bold"
+        },
+        columnStyles: {
+          0: { cellWidth: 12, halign: "center" },
+          1: { cellWidth: 80 },
+          2: { cellWidth: 80 },
+          3: { cellWidth: 95 }
+        },
+        theme: "striped"
+      });
+
+      // Footer
+      doc.setFontSize(8);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "normal");
+      doc.setTextColor(148, 163, 184); // slate-400
+      doc.text("Được tạo lập bởi Trình Tạo Chiến Lược AI Brand Strategy Hub • Trang 1/3", 148, 203, { align: "center" });
+
+      // ==========================================
+      // PAGE 2: CHÂN DUNG KHÁCH HÀNG MỤC TIÊU
+      // ==========================================
+      doc.addPage();
+      
+      // Page Top Header slate-900 ribbon
+      doc.setFillColor(15, 23, 42);
+      doc.rect(0, 0, 297, 18, "F");
+
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(11);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "bold");
+      doc.text("HỒ SƠ CHÂN DUNG KHÁCH HÀNG LÝ TƯỞNG (TARGET PERSONA SURVEY)", 15, 11);
+
+      doc.setFontSize(8);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "normal");
+      doc.setTextColor(148, 163, 184);
+      doc.text(`Chiến dịch: ${productName} (Mã: ${productCode || "PROD"})`, 282, 11, { align: "right" });
+
+      doc.setFontSize(12);
+      doc.setTextColor(15, 23, 42);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "bold");
+      doc.text("PHÂN TÍCH CHÂN DUNG & KHÁC BIỆT HOÁ ĐỊNH VỊ TÂM LÝ SÂU SẮC", 15, 29);
+
+      // Construct elegant table for Persona Demographics
+      const personaHeaders = [["Hạt nhân định nghĩa", "Nội dung giải mã tâm lý & Insight chi tiết"]];
+      const personaBody = [
+        ["1. Danh xưng nhóm khách hàng lý tưởng (Persona Name)", chosenPersona?.name || "N/A"],
+        ["2. Giải mã nhân khẩu học & Hành vi mua sắm thói quen", chosenPersona?.demographics || "N/A"],
+        ["3. Nỗi bức xúc cốt lõi / Nỗi đau sâu thẳm thầm kín (Key Pain Point)", chosenPersona?.painPoints || "N/A"],
+        ["4. Xúc cảm mua sắm & Lợi ích kỳ vọng đột phá (Desired Benefits)", chosenPersona?.benefits || "N/A"],
+        ["5. Tâm niệm thầm kín tự quy định (Deep Insight / Persona Mind)", chosenPersona?.summary || "N/A"]
+      ];
+
+      autoTable(doc, {
+        head: personaHeaders,
+        body: personaBody,
+        startY: 34,
+        margin: { left: 15, right: 15 },
+        styles: {
+          font: fontLoaded ? "Roboto" : "helvetica",
+          fontSize: 9.5,
+          cellPadding: 5.5
+        },
+        headStyles: {
+          fillColor: [15, 23, 42], // slate-900
+          textColor: [255, 255, 255],
+          fontStyle: "bold"
+        },
+        columnStyles: {
+          0: { cellWidth: 85, fontStyle: "bold", fillColor: [248, 250, 252] },
+          1: { cellWidth: 182 }
+        },
+        theme: "grid"
+      });
+
+      doc.setFontSize(8);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "normal");
+      doc.setTextColor(148, 163, 184); // slate-400
+      doc.text("Được tạo lập bởi Trình Tạo Chiến Lược AI Brand Strategy Hub • Trang 2/3", 148, 203, { align: "center" });
+
+      // ==========================================
+      // PAGE 3: ĐẠI MA TRẬN ĐỊNH VỊ CHIẾN LƯỢC 8 BƯỚC
+      // ==========================================
+      doc.addPage();
+
+      // Page Top Header slate-900 ribbon
+      doc.setFillColor(15, 23, 42);
+      doc.rect(0, 0, 297, 18, "F");
+
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(11);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "bold");
+      doc.text("BẢNG ĐẠI MA TRẬN MARKETING ĐỊNH VỊ 8 BƯỚC CHI TIẾT (8-COLUMN MATRIX)", 15, 11);
+
+      doc.setFontSize(8);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "normal");
+      doc.setTextColor(148, 163, 184);
+      doc.text(`Sản phẩm: ${productName}`, 282, 11, { align: "right" });
+
+      doc.setFontSize(12);
+      doc.setTextColor(15, 23, 42);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "bold");
+      doc.text("BẢNG HOẠCH ĐỊNH KỊCH BẢN - THÔNG ĐIỆP & MINH HỌA HÌNH ẢNH (KEY VISUAL)", 15, 29);
+
+      const matrixHeaders = [[
+        "STT",
+        "Bước (Step)",
+        "Mục Tiêu Tâm Lý",
+        "Nỗi Đau & Mong Muốn",
+        "Các bước triển khai",
+        "USP cốt lõi",
+        "Headline hiển thị",
+        "Visual Key minh họa"
+      ]];
+
+      const matrixBody = reportRows.map((row) => [
+        row.stt ? row.stt.toString() : "",
+        row.step || "",
+        row.psychologicalGoal || "",
+        row.painPointAndDesire || "",
+        row.stepsDetail || "",
+        row.uspDetail || "",
+        row.headlineSubheadline || "",
+        row.visualKey || ""
+      ]);
+
+      autoTable(doc, {
+        head: matrixHeaders,
+        body: matrixBody,
+        startY: 34,
+        margin: { left: 10, right: 10 },
+        styles: {
+          font: fontLoaded ? "Roboto" : "helvetica",
+          fontSize: 7.2,
+          cellPadding: 2.2
+        },
+        headStyles: {
+          fillColor: [37, 99, 235], // blue-600
+          textColor: [255, 255, 255],
+          fontStyle: "bold"
+        },
+        columnStyles: {
+          0: { cellWidth: 8, halign: "center" },   // STT
+          1: { cellWidth: 26, fontStyle: "bold" }, // Bước (Step)
+          2: { cellWidth: 32 },                    // Mục Tiêu Tâm Lý
+          3: { cellWidth: 36 },                    // Nỗi Đau & Mong Muốn
+          4: { cellWidth: 46 },                    // Các bước triển khai
+          5: { cellWidth: 44 },                    // USP
+          6: { cellWidth: 44 },                    // Headline
+          7: { cellWidth: 41 }                     // Visual Key
+        },
+        theme: "striped"
+      });
+
+      doc.setFontSize(8);
+      doc.setFont(fontLoaded ? "Roboto" : "helvetica", "normal");
+      doc.setTextColor(148, 163, 184); // slate-400
+      doc.text("Được tạo lập bởi Trình Tạo Chiến Lược AI Brand Strategy Hub • Trang 3/3", 148, 203, { align: "center" });
+
+      // Save PDF output
+      const filename = `${getCustomFileName()}.pdf`;
+      doc.save(filename);
+    } catch (e) {
+      console.error(e);
+      alert("Đã xảy ra lỗi khi tạo PDF. Vui lòng kiểm tra kết nối mạng và thử lại!");
+    } finally {
+      setIsGeneratingPdf(false);
+    }
   };
 
   const handleMainSyncClick = () => {
@@ -2470,6 +2775,21 @@ export default function App() {
                     >
                       <Download className="w-5 h-5 text-blue-100" />
                       <span>TẢI FILE EXCEL MASTER BÀN GIAO</span>
+                    </button>
+
+                    <button
+                      id="btn-download-pdf"
+                      onClick={handleDownloadPDF}
+                      disabled={isGeneratingPdf}
+                      className="px-6 py-3 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-800 disabled:opacity-50 text-white rounded-xl text-sm font-black flex items-center gap-2 transition duration-200 cursor-pointer shadow-lg shadow-rose-500/25 active:scale-95"
+                      title="Xuất file báo cáo chiến dịch PDF đẹp mắt"
+                    >
+                      {isGeneratingPdf ? (
+                        <RefreshCw className="w-5 h-5 text-rose-100 animate-spin" />
+                      ) : (
+                        <FileText className="w-5 h-5 text-rose-100" />
+                      )}
+                      <span>{isGeneratingPdf ? "ĐANG TẠO PDF..." : "TẢI BÁO CÁO PDF ĐẸP MẮT"}</span>
                     </button>
                   </div>
                 </div>
