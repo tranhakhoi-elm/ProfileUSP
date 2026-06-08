@@ -723,7 +723,7 @@ app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
       contents.push({ text: imagePrompt });
 
-      // Using gemini-2.5-flash-image first as it is the most economical, fast, and cost-effective option
+      // Using gemini-3.1-flash-image as the high-quality model default matching the 5-element composite setup
       const response = await generateContentWithFallback({
         contents: { parts: contents },
         config: {
@@ -732,7 +732,7 @@ app.use(express.urlencoded({ limit: "100mb", extended: true }));
             imageSize: "1K"
           },
         },
-        modelPreference: ["gemini-2.5-flash-image", "gemini-3.1-flash-image", "gemini-3-pro-image"],
+        modelPreference: ["gemini-3.1-flash-image", "gemini-3-pro-image", "gemini-2.5-flash-image"],
       });
 
       let base64Image = "";
@@ -747,7 +747,7 @@ app.use(express.urlencoded({ limit: "100mb", extended: true }));
       }
 
       if (!base64Image) {
-        throw new Error("Không nhận được phản hồi hình ảnh hợp lệ từ mô hình tiết kiệm.");
+        throw new Error("Không nhận được phản hồi hình ảnh hợp lệ từ mô hình AI cao cấp.");
       }
 
       res.json({ imageUrl: base64Image });

@@ -3430,7 +3430,7 @@ export default function App() {
                             <th className="w-[300px] px-3 py-3.5 text-left text-xs font-black text-slate-500 uppercase tracking-wider">{"USP (Lợi ích khách hàng -> Thông số kỹ thuật)"}</th>
                             <th className="w-[240px] px-3 py-3.5 text-left text-xs font-black text-slate-500 uppercase tracking-wider">Headline - Subheadline (Text hiển thị trên ảnh)</th>
                             <th className="w-[250px] px-3 py-3.5 text-left text-xs font-black text-slate-500 uppercase tracking-wider">Minh họa hình ảnh (Visual Key)</th>
-                            <th className="w-[300px] px-3 py-3.5 text-left text-xs font-black text-slate-500 uppercase tracking-wider print:hidden">Thiết kế ảnh AI (Tiết kiệm)</th>
+                            <th className="w-[300px] px-3 py-3.5 text-left text-xs font-black text-slate-500 uppercase tracking-wider print:hidden">Thiết kế ảnh USP bằng AI</th>
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-slate-200 divide-x divide-slate-100">
@@ -3516,7 +3516,7 @@ export default function App() {
                                 />
                               </td>
 
-                              {/* Thiết kế ảnh AI (Tiết kiệm) */}
+                              {/* Thiết kế ảnh USP bằng AI */}
                               <td className="px-3 py-3 bg-slate-50/20 print:hidden min-w-[300px]">
                                 <div className="space-y-2">
                                   {row.imageUrl ? (
@@ -3594,7 +3594,7 @@ export default function App() {
                                         )}
                                       </button>
                                       <p className="text-[9px] text-slate-400 mt-1.5 font-medium leading-normal max-w-[240px] mx-auto">
-                                        Mô hình tiết kiệm kết hợp mẫu sản phẩm thực tế để dựng cảnh chân thực.
+                                        Mô hình cao cấp kết hợp mẫu sản phẩm thực tế để dựng phân cảnh ứng dụng chân thực nhất.
                                       </p>
                                     </div>
                                   )}
