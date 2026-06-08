@@ -66,6 +66,7 @@ export default function App() {
   const [productName, setProductName] = useState<string>("");
   const [productDescription, setProductDescription] = useState<string>("");
   const [productImage, setProductImage] = useState<string>("");
+  const [productImages, setProductImages] = useState<string[]>([]);
   const [imageLoading, setImageLoading] = useState<boolean>(false);
   const [uploadedFileName, setUploadedFileName] = useState<string>("");
   const [dragActive, setDragActive] = useState<boolean>(false);
@@ -98,6 +99,8 @@ export default function App() {
   // Export & Copy Success feedback
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
+  const [compositeImage, setCompositeImage] = useState<string>("");
+  const [isGeneratingComposite, setIsGeneratingComposite] = useState<boolean>(false);
 
   // Step 5: Finalized report rows (8-column matrix from AI)
   const [reportRows, setReportRows] = useState<FinalMasterRow[]>([]);
@@ -527,7 +530,12 @@ export default function App() {
     if (file.type.startsWith("image/")) {
       reader.onload = (e) => {
         if (e.target?.result) {
-          setProductImage(e.target.result as string);
+          const base64Image = e.target.result as string;
+          setProductImages((prev) => {
+            const updated = [...prev, base64Image];
+            setProductImage(updated[0] || "");
+            return updated;
+          });
         }
       };
       reader.readAsDataURL(file);
@@ -655,18 +663,53 @@ export default function App() {
     }
   };
 
-  // Image Upload handler
+  // Multiple Image Upload handler
   const handleImageUploadChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setProductImage(event.target.result as string);
-        }
-      };
-      reader.readAsDataURL(file);
+    if (e.target.files && e.target.files.length > 0) {
+      const files = Array.from(e.target.files) as File[];
+      const readPromises = files.map((file) => {
+        return new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            if (event.target?.result) {
+              resolve(event.target.result as string);
+            } else {
+              resolve("");
+            }
+          };
+          reader.readAsDataURL(file);
+        });
+      });
+
+      Promise.all(readPromises).then((results) => {
+        const validResults = results.filter(Boolean);
+        setProductImages((prev) => {
+          const newImages = [...prev, ...validResults];
+          setProductImage(newImages[0] || "");
+          return newImages;
+        });
+      });
     }
+  };
+
+  // Helper to remove an image from the list of product images
+  const handleRemoveImage = (indexToRemove: number) => {
+    setProductImages((prev) => {
+      const updated = prev.filter((_, idx) => idx !== indexToRemove);
+      setProductImage(updated[0] || "");
+      return updated;
+    });
+  };
+
+  // Helper to download the 5 Visual Key composite illustration model
+  const handleDownloadCompositeImage = () => {
+    if (!compositeImage) return;
+    const link = document.createElement("a");
+    link.href = compositeImage;
+    link.download = `Phan_Tich_Phoi_Canh_5_Yeu_To_${productName ? productName.trim().replace(/\s+/g, "_") : "San_Pham"}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Helper to safely execute backend calls and prevent "Unexpected token 'T'..." invalid JSON errors when Server returns HTML/404/500
@@ -735,6 +778,7 @@ export default function App() {
           productName,
           productDescription,
           productBase64Image: productImage,
+          productBase64Images: productImages,
         }),
       });
 
@@ -875,6 +919,7 @@ export default function App() {
     setProductName("");
     setProductDescription("");
     setProductImage("");
+    setProductImages([]);
     setUploadedFileName("");
     setPersonas([]);
     setSelectedPersonaIndex(null);
@@ -882,7 +927,96 @@ export default function App() {
     setUsps([]);
     setSelectedUsps([]);
     setReportRows([]);
+    setCompositeImage("");
     setError(null);
+  };
+
+  // Generate composite image for the 5 visual elements based on the product image with white background
+  const handleGenerateCompositeImage = async () => {
+    if (reportRows.length === 0) {
+      setError("Vui lòng hoàn thiện và tạo Bảng Chiến Lược Định Vị để trích xuất 5 yếu tố.");
+      return;
+    }
+    setError(null);
+    setIsGeneratingComposite(true);
+
+    try {
+      // Gather visualKey descriptions from master rows
+      const visualKeys = reportRows.map((row) => row.visualKey || "").filter(Boolean);
+      
+      const response = await safeFetchJson("/api/generate-composite-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productName,
+          productImage, // our base64 product image
+          productImages, // multiple base64 product images
+          visualKeys,
+        }),
+      });
+
+      if (response && response.imageUrl) {
+        setCompositeImage(response.imageUrl);
+      } else {
+        throw new Error("Không nhận được dữ liệu ảnh mô phỏng từ AI.");
+      }
+    } catch (err: any) {
+      setError(err?.message || "Đã xảy ra lỗi khi tạo hình ảnh mô tả 5 yếu tố.");
+    } finally {
+      setIsGeneratingComposite(false);
+    }
+  };
+
+  // Generate an individual targeted functional AI image for a specific USP row (economical mode)
+  const handleGenerateIndividualUspImage = async (index: number) => {
+    const row = reportRows[index];
+    if (!row) return;
+    if (!row.visualKey) {
+      setError(`Dòng số ${index + 1} chưa có thông tin Mô tả hình ảnh (Visual Key).`);
+      return;
+    }
+
+    setReportRows((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], isGeneratingImage: true };
+      return updated;
+    });
+
+    try {
+      const response = await safeFetchJson("/api/generate-individual-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productName,
+          productImage,
+          productImages,
+          visualKey: row.visualKey,
+          uspDetail: row.uspDetail,
+          painPointAndDesire: row.painPointAndDesire,
+        }),
+      });
+
+      if (response && response.imageUrl) {
+        setReportRows((prev) => {
+          const updated = [...prev];
+          updated[index] = { 
+            ...updated[index], 
+            imageUrl: response.imageUrl, 
+            isGeneratingImage: false 
+          };
+          return updated;
+        });
+      } else {
+        throw new Error("Không nhận được phản hồi hình ảnh hợp lệ từ Gemini.");
+      }
+    } catch (err: any) {
+      setError(`Lỗi tạo ảnh cho STT ${row.stt}: ` + (err?.message || "Đã xảy ra lỗi."));
+      setReportRows((prev) => {
+        const updated = [...prev];
+        updated[index] = { ...updated[index], isGeneratingImage: false };
+        return updated;
+      });
+    }
   };
 
   // Export utilities for Step 5
@@ -2064,62 +2198,80 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Image Demo Illustration Module for uploading white bg image */}
-                  <div className="bg-slate-50 p-4 sm:p-5 rounded-xl border border-slate-200 space-y-3.5">
+                  {/* Image Demo Illustration Module for uploading white bg image (Supports multiple images for multi-angle analysis) */}
+                  <div className="bg-slate-50 p-4 sm:p-5 rounded-xl border border-slate-200 space-y-4">
                     <div className="space-y-1">
                       <label className="block text-xs font-black uppercase tracking-wider text-slate-700 font-sans">
-                        Ảnh chụp sản phẩm nền trắng (Tùy chọn)
+                        Hình ảnh chụp sản phẩm từ nhiều góc độ (Tùy chọn)
                       </label>
                       <p className="text-slate-500 text-[11px] leading-normal font-medium font-sans">
-                        Tải lên ảnh chụp thực tế của sản phẩm trên nền trắng để thiết kế bối cảnh hiển thị trực quan và tối ưu định vị thương hiệu.
+                        Hỗ trợ tải lên nhiều hình ảnh của sản phẩm ở nhiều góc chụp khác nhau (vỏ hộp, chi tiết máy, mặt trước, mặt sau...) giúp AI tìm kiếm định vị và thiết kế bối cảnh 3D trực quan chính xác nhất.
                       </p>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row items-center gap-4">
-                      <div className="w-28 h-28 shrink-0 bg-white border border-slate-200 rounded-xl flex items-center justify-center relative overflow-hidden group shadow-xxs">
-                        {productImage ? (
-                          <>
-                            <img
-                              src={productImage}
-                              alt="Xem trước sản phẩm"
-                              referrePolicy="no-referrer"
-                              className="w-full h-full object-cover"
-                            />
-                            <button
-                              id="btn-remove-img"
-                              type="button"
-                              onClick={() => setProductImage("")}
-                              className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-bold transition duration-200 cursor-pointer font-sans"
-                            >
-                              Gỡ bỏ ảnh
-                            </button>
-                          </>
-                        ) : (
-                          <div className="text-center p-3 text-slate-400 flex flex-col items-center justify-center">
-                            <PhotoIconPlaceholder />
-                            <span className="text-[9px] font-bold uppercase tracking-widest text-slate-350 font-sans">Không ảnh</span>
-                          </div>
-                        )}
-                      </div>
+                    <div className="space-y-4 w-full">
+                      {productImages.length > 0 && (
+                        <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+                          {productImages.map((imgUrl, index) => (
+                            <div key={index} className="aspect-square relative rounded-xl border border-slate-200 overflow-hidden bg-white shadow-xxs group">
+                              <img
+                                src={imgUrl}
+                                alt={`Xem trước góc ${index + 1}`}
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover"
+                              />
+                              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center p-2 transition duration-150 gap-1.5 decoding-async">
+                                <span className="text-[10px] text-white font-black tracking-wider uppercase font-sans">Góc {index + 1}</span>
+                                <div className="flex gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const link = document.createElement("a");
+                                      link.href = imgUrl;
+                                      link.download = `Anh_Goc_${index + 1}_${productName ? productName.trim().replace(/\s+/g, "_") : "San_Pham"}.png`;
+                                      document.body.appendChild(link);
+                                      link.click();
+                                      document.body.removeChild(link);
+                                    }}
+                                    className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[10px] font-bold cursor-pointer transition duration-150 font-sans flex items-center gap-0.5"
+                                  >
+                                    Tải về
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveImage(index)}
+                                    className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-[10px] font-bold cursor-pointer transition duration-150 font-sans"
+                                  >
+                                    Gỡ bỏ
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
-                      <div className="flex-1 w-full space-y-2">
-                        <input
-                          type="file"
-                          id="image-file-upload"
-                          accept="image/*"
-                          onChange={handleImageUploadChange}
-                          className="hidden"
-                        />
-                        <label
-                          htmlFor="image-file-upload"
-                          className="w-full py-3 px-4 border border-slate-250 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xxs transition duration-150 font-sans"
-                        >
-                          <UploadCloud className="w-4 h-4 text-blue-600" />
-                          <span>Tải lên ảnh sản phẩm từ thiết bị</span>
-                        </label>
-                        <p className="text-[10px] text-slate-400 font-medium font-sans">
-                          Hỗ trợ định dạng: PNG, JPG, JPEG, WEBP. Nên sử dụng ảnh sản phẩm có nền trắng sạch để làm cơ sở thiết kế.
-                        </p>
+                      <div className="flex flex-col sm:flex-row items-center gap-4">
+                        <div className="flex-1 w-full space-y-2">
+                          <input
+                            type="file"
+                            id="image-file-upload"
+                            accept="image/*"
+                            multiple
+                            onChange={handleImageUploadChange}
+                            className="hidden"
+                          />
+                          <label
+                            htmlFor="image-file-upload"
+                            className="w-full py-3 px-4 border border-slate-250 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xxs transition duration-150 font-sans"
+                          >
+                            <UploadCloud className="w-4 h-4 text-blue-605 text-blue-600" />
+                            <span>Tải hoặc kéo thả các tệp hình ảnh sản phẩm</span>
+                          </label>
+                          <p className="text-[10px] text-slate-400 font-medium font-sans">
+                            Định dạng hỗ trợ: PNG, JPG, JPEG, WEBP. Chọn nhiều tệp để AI có thêm nguồn dữ liệu phân tích chi tiết.
+                          </p>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -2769,6 +2921,21 @@ export default function App() {
 
                   <div className="flex flex-wrap items-center gap-2.5 z-10">
                     <button
+                      id="btn-generate-composite-image"
+                      onClick={handleGenerateCompositeImage}
+                      disabled={isGeneratingComposite}
+                      className="px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 text-white rounded-xl text-sm font-black flex items-center gap-2 transition duration-200 cursor-pointer shadow-lg shadow-emerald-500/25 active:scale-95"
+                      title="Sử dụng Gemini tạo ảnh mô phỏng hộp dựa trên 5 yếu tố bối cảnh"
+                    >
+                      {isGeneratingComposite ? (
+                        <RefreshCw className="w-5 h-5 text-emerald-100 animate-spin" />
+                      ) : (
+                        <Sparkles className="w-5 h-5 text-emerald-200 animate-pulse" />
+                      )}
+                      <span>{isGeneratingComposite ? "ĐANG VẼ 5 YẾU TỐ..." : "TẠO HÌNH ẢNH MÔ TẢ THEO 5 YẾU TỐ"}</span>
+                    </button>
+
+                    <button
                       id="btn-download-csv"
                       onClick={handleDownloadCSV}
                       className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-black flex items-center gap-2 transition duration-200 cursor-pointer shadow-lg shadow-blue-500/25 active:scale-95"
@@ -3090,13 +3257,30 @@ export default function App() {
                         </div>
 
                         {productImage && (
-                          <div className="w-full h-44 rounded-xl border border-slate-200 overflow-hidden bg-slate-50 flex items-center justify-center sm:max-w-xs shadow-xxs">
-                            <img
-                              src={productImage}
-                              alt={productName}
-                              referrerPolicy="no-referrer"
-                              className="w-full h-full object-cover"
-                            />
+                          <div className="space-y-2">
+                            <div className="w-full h-44 rounded-xl border border-slate-200 overflow-hidden bg-slate-50 flex items-center justify-center sm:max-w-xs shadow-xxs">
+                              <img
+                                src={productImage}
+                                alt={productName}
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const link = document.createElement("a");
+                                link.href = productImage;
+                                link.download = `Anh_Dai_Dien_${productName ? productName.trim().replace(/\s+/g, "_") : 'San_Pham'}.png`;
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-705 text-slate-700 rounded-lg text-[11px] font-bold cursor-pointer shadow-xxs transition duration-150 font-sans print:hidden"
+                            >
+                              <Download className="w-3.5 h-3.5 text-blue-600" />
+                              <span>Tải ảnh đại diện</span>
+                            </button>
                           </div>
                         )}
 
@@ -3141,6 +3325,84 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Section IV: Optional AI Generated Composite Image showing 5 criteria */}
+                  <div className="space-y-4 pt-6 border-t border-slate-200">
+                    <div className="flex items-center justify-between pb-2.5 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-5 h-5 text-emerald-600 animate-pulse" />
+                        <h4 className="font-extrabold text-slate-900 text-sm sm:text-base tracking-tight uppercase">
+                          IV. BẢN VẼ PHỐI CẢNH 5 YẾU TỐ AI CÔNG NĂNG
+                        </h4>
+                      </div>
+                      {compositeImage && (
+                        <span className="text-[10px] text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full font-bold uppercase tracking-widest print:hidden">
+                          ✓ Đã hoàn tất kiến tạo thiết kế
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col items-center justify-center p-4 bg-slate-50/50 border border-slate-150 rounded-2xl min-h-[160px] relative overflow-hidden">
+                      {isGeneratingComposite ? (
+                        <div className="flex flex-col items-center justify-center space-y-4 py-8">
+                          <RefreshCw className="w-10 h-10 text-emerald-600 animate-spin" />
+                          <div className="text-center">
+                            <p className="font-extrabold text-slate-800 text-sm">Hệ thống AI Gemini đang hợp tác sáng tạo phối cảnh...</p>
+                            <p className="text-slate-500 text-[11px] mt-1">Quá trình này bóc tách dữ liệu 5 yếu tố kết hợp ảnh gốc sản phẩm để phân tích bối cảnh thực tế. Vui lòng đợi trong giây lát.</p>
+                          </div>
+                        </div>
+                      ) : compositeImage ? (
+                        <div className="w-full flex flex-col items-center space-y-4 py-3">
+                          <div className="w-full max-w-md aspect-square rounded-xl overflow-hidden border border-slate-200 shadow-md bg-white">
+                            <img
+                              src={compositeImage}
+                              alt="AI Composite showcase"
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-contain"
+                            />
+                          </div>
+
+                          <div className="flex flex-wrap gap-2.5 justify-center print:hidden">
+                            <button
+                              type="button"
+                              onClick={handleDownloadCompositeImage}
+                              className="inline-flex items-center gap-1.5 px-4.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-wider transition duration-150 cursor-pointer shadow-md active:scale-95"
+                            >
+                              <Download className="w-4 h-4 text-white" />
+                              <span>Tải xuống Bản phối cảnh</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleGenerateCompositeImage}
+                              disabled={isGeneratingComposite}
+                              className="inline-flex items-center gap-1.5 px-4.5 py-2.5 border border-slate-250 bg-white hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold transition duration-150 cursor-pointer shadow-xxs active:scale-95 disabled:opacity-50"
+                            >
+                              <RefreshCw className={`w-3.5 h-3.5 text-slate-550 ${isGeneratingComposite ? 'animate-spin' : ''}`} />
+                              <span>Tạo lại phối cảnh khác</span>
+                            </button>
+                          </div>
+
+                          <p className="text-slate-500 text-xs italic max-w-lg text-center leading-relaxed">
+                            Ảnh minh họa 5 yếu tố công năng thiết lập dựa trên sản phẩm gốc giữ nguyên 100% kết cấu, thể hiện sinh động bối cảnh ứng dụng thực tế.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="text-center py-6 px-4 space-y-3 print:hidden">
+                          <p className="text-slate-500 text-xs leading-relaxed max-w-md font-medium">
+                            Chưa có hình ảnh phối cảnh AI. Nhấp nút dưới đây để ra lệnh cho AI kết hợp ảnh sản phẩm gốc (giữ nguyên kết cấu, màu sắc) và vẽ 5 phân cảnh mô tả công dụng thực tế của thương hiệu.
+                          </p>
+                          <button
+                            onClick={handleGenerateCompositeImage}
+                            disabled={isGeneratingComposite}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition duration-150 cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>Kiến tạo bản vẽ 5 công dụng thương hiệu</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
                   {/* Section 3: Master Definitive 8-Stage Marketing Blueprint Table */}
                   <div className="space-y-5 pt-6 border-t border-slate-200">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
@@ -3157,7 +3419,7 @@ export default function App() {
                     </div>
 
                     <div className="overflow-x-auto border border-slate-200 rounded-2xl shadow-xs bg-white print:border-none print:shadow-none">
-                      <table className="min-w-[1700px] lg:w-full border-collapse divide-y divide-slate-200 table-fixed">
+                      <table className="min-w-[2000px] lg:w-full border-collapse divide-y divide-slate-200 table-fixed">
                         <thead className="bg-slate-50 print:bg-slate-100">
                           <tr>
                             <th className="w-[70px] px-3 py-3.5 text-center text-xs font-black text-slate-500 uppercase tracking-wider">STT</th>
@@ -3168,6 +3430,7 @@ export default function App() {
                             <th className="w-[300px] px-3 py-3.5 text-left text-xs font-black text-slate-500 uppercase tracking-wider">{"USP (Lợi ích khách hàng -> Thông số kỹ thuật)"}</th>
                             <th className="w-[240px] px-3 py-3.5 text-left text-xs font-black text-slate-500 uppercase tracking-wider">Headline - Subheadline (Text hiển thị trên ảnh)</th>
                             <th className="w-[250px] px-3 py-3.5 text-left text-xs font-black text-slate-500 uppercase tracking-wider">Minh họa hình ảnh (Visual Key)</th>
+                            <th className="w-[300px] px-3 py-3.5 text-left text-xs font-black text-slate-500 uppercase tracking-wider print:hidden">Thiết kế ảnh AI (Tiết kiệm)</th>
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-slate-200 divide-x divide-slate-100">
@@ -3251,6 +3514,91 @@ export default function App() {
                                   onChange={(e) => handleUpdateRowCell(index, "visualKey", e.target.value)}
                                   className="w-full text-xs text-slate-600 bg-transparent border border-transparent hover:border-slate-300 focus:border-blue-500 hover:bg-white focus:bg-white focus:ring-1 focus:ring-blue-500 rounded p-1.5 resize-y leading-relaxed print:border-none print:resize-none print:p-0 print:bg-transparent"
                                 />
+                              </td>
+
+                              {/* Thiết kế ảnh AI (Tiết kiệm) */}
+                              <td className="px-3 py-3 bg-slate-50/20 print:hidden min-w-[300px]">
+                                <div className="space-y-2">
+                                  {row.imageUrl ? (
+                                    <div className="space-y-2 text-center">
+                                      <div className="w-full aspect-square max-w-[200px] mx-auto rounded-xl border border-slate-200 overflow-hidden bg-slate-50 flex items-center justify-center relative shadow-xxs group">
+                                        <img
+                                          src={row.imageUrl}
+                                          alt={`Ảnh minh họa STT ${row.stt}`}
+                                          referrerPolicy="no-referrer"
+                                          className="w-full h-full object-cover"
+                                        />
+                                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition duration-150">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const link = document.createElement("a");
+                                              link.href = row.imageUrl!;
+                                              link.download = `USP_Image_STT_${row.stt}_${productName ? productName.trim().replace(/\s+/g, "_") : "San_Pham"}.png`;
+                                              document.body.appendChild(link);
+                                              link.click();
+                                              document.body.removeChild(link);
+                                            }}
+                                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold cursor-pointer transition duration-150 flex items-center gap-1 shadow-sm"
+                                          >
+                                            <Download className="w-3 h-3 text-white" />
+                                            <span>Tải ảnh</span>
+                                          </button>
+                                        </div>
+                                      </div>
+                                      <div className="flex justify-center gap-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleGenerateIndividualUspImage(index)}
+                                          disabled={row.isGeneratingImage}
+                                          className="flex items-center gap-1 px-2 py-1.5 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-lg text-[10px] font-bold cursor-pointer transition duration-150 shadow-xxs disabled:opacity-50"
+                                        >
+                                          <RefreshCw className={`w-3 h-3 text-slate-550 ${row.isGeneratingImage ? 'animate-spin' : ''}`} />
+                                          <span>Vẽ lại</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const link = document.createElement("a");
+                                            link.href = row.imageUrl!;
+                                            link.download = `USP_Image_STT_${row.stt}_${productName ? productName.trim().replace(/\s+/g, "_") : "San_Pham"}.png`;
+                                            document.body.appendChild(link);
+                                            link.click();
+                                            document.body.removeChild(link);
+                                          }}
+                                          className="flex items-center gap-1 px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold cursor-pointer transition duration-150 shadow-xxs"
+                                        >
+                                          <Download className="w-3 h-3 text-white" />
+                                          <span>Tải xuống</span>
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="text-center py-3">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleGenerateIndividualUspImage(index)}
+                                        disabled={row.isGeneratingImage}
+                                        className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-[11px] font-extrabold uppercase tracking-wider flex items-center justify-center gap-1.5 transition duration-150 cursor-pointer shadow-sm active:scale-95"
+                                      >
+                                        {row.isGeneratingImage ? (
+                                          <>
+                                            <RefreshCw className="w-3.5 h-3.5 text-blue-100 animate-spin" />
+                                            <span>Đang thiết kế...</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                                            <span>Thiết kế ảnh USP</span>
+                                          </>
+                                        )}
+                                      </button>
+                                      <p className="text-[9px] text-slate-400 mt-1.5 font-medium leading-normal max-w-[240px] mx-auto">
+                                        Mô hình tiết kiệm kết hợp mẫu sản phẩm thực tế để dựng cảnh chân thực.
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
                               </td>
                             </tr>
                           ))}

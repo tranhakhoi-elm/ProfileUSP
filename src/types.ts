@@ -41,6 +41,8 @@ export interface FinalMasterRow {
   uspDetail: string;
   headlineSubheadline: string;
   visualKey: string;
+  imageUrl?: string;
+  isGeneratingImage?: boolean;
 }
 
 export interface ParsedSheet {

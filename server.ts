@@ -101,7 +101,8 @@ const app = express();
 const PORT = 3000;
 
 // Use JSON payload deserialization with limit configured for image upload/transmission
-app.use(express.json({ limit: "15mb" }));
+app.use(express.json({ limit: "100mb" }));
+app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
   // Global error/payload too large handler to log issues and return clean JSON to client instead of HTML
   app.use((err: any, req: any, res: any, next: any) => {
@@ -129,7 +130,7 @@ app.use(express.json({ limit: "15mb" }));
   // API endpoint for generating 5 Criteria analysis with questions & 4 Customer Personas based on Product details
   app.post("/api/personas", async (req, res) => {
     try {
-      const { productName, productDescription, productBase64Image } = req.body;
+      const { productName, productDescription, productBase64Image, productBase64Images } = req.body;
       if (!productName || !productDescription) {
         return res.status(400).json({ error: "Vui lòng điền tên và mô tả sản phẩm." });
       }
@@ -138,12 +139,17 @@ app.use(express.json({ limit: "15mb" }));
 
       const baseInstruction = `
         Bạn là chuyên gia xuất sắc về Quản trị Trải nghiệm Khách hàng (CX) kiêm Giám đốc Nghiên cứu Thị trường kỳ cựu.
-        Sản phẩm cần phân tích: Tên: "${productName}" | Mô tả chi tiết: "${productDescription}"
+        Sản phẩm cần phân tích: Tên: "${productName}" | Mô tả chi tiết, thông số và tính năng của sản phẩm: "${productDescription}"
+
+        QUY TẮC PHÂN TÍCH QUAN TRỌNG:
+        1. Hãy phân tích chuyên sâu các thông số kỹ thuật, đặc tính và tính năng cụ thể của sản phẩm trong phần mô tả đi kèm.
+        2. Nếu có hình ảnh sản phẩm đính kèm (hỗ trợ nhiều góc độ hình ảnh khác nhau), hãy quan sát kĩ kiểu dáng, bao bì, thiết kế đồ họa của sản phẩm để đánh giá định vị thương hiệu trực quan một cách chính xác nhất.
+        3. Thực hiện so sánh ngầm hoặc trực tiếp sản phẩm này với các giải pháp thay thế đang có trên thị trường hiện nay nhằm xác định định vị độc đáo và đối điểm định vị sắc nét. Từ đó, đưa ra các gợi ý chân dung khách hàng và câu trả lời khảo sát chính xác tuyệt đối, đúng trọng tâm nhất, tránh các mô tả chung chung lý thuyết.
 
         NHIỆM VỤ CỦA BẠN GỒM 2 PHẦN CHÍNH:
 
         PHẦN 1: BẢN PHÂN TÍCH 5 TIÊU CHÍ KINH ĐIỂN TRƯỚC KHI LẬP CHÂN DUNG
-        Hãy trả lời thấu đáo từng câu hỏi trong bộ câu hỏi dưới đây dựa trên dữ liệu sản phẩm, tài liệu tải lên để tìm ra câu trả lời thuyết phục nhất cho từng tiêu chí:
+        Hãy trả lời thấu đáo từng câu hỏi trong bộ câu hỏi dưới đây dựa trên dữ liệu sản phẩm, tài liệu tải lên để tìm ra câu trả lời thuyết phục nhất cho từng tiêu chí, gắn kết chặt chẽ với thế mạnh cạnh tranh sau khi so sánh thị trường:
         
         1. Tiêu chí: "Xác định khu vực khách hàng mục tiêu" (Chi tiết: Quốc gia/ Khu vực/ Thành phố...)
            Các câu hỏi cần trả lời:
@@ -194,16 +200,28 @@ app.use(express.json({ limit: "15mb" }));
            - Sự bảo chứng hoặc chính sách đổi trả nào sẽ gỡ bỏ 100% rào cản phòng vệ của họ?
 
         PHẦN 2: PHÁC HỌA 4 CHÂN DUNG KHÁCH HÀNG LÝ TƯỞNG (PERSONAS)
-        Từ kết quả phân tích 5 tiêu chí trên, hãy đúc kết ra 4 chân dung khách hàng lý tưởng độc lập đại diện cho các trường hợp điển hình nhất.
-        Đảm bảo mỗi chân dung tập trung phân khúc khác biệt nhưng đều có liên quan mật thiết đến giá trị của sản phẩm.
+        Từ kết quả phân tích 5 tiêu chí trên kết hợp với kết quả so sánh định vị sản phẩm trên thị trường, hãy đúc kết ra 4 chân dung khách hàng lý tưởng độc lập đại diện cho các đối tượng cốt lõi nhất.
+        Đảm bảo mỗi chân dung tập trung phân khúc khác biệt nhưng đều nhắm trúng các ưu điểm, thông số kỹ thuật thực tế và tính công dụng thực tế của sản phẩm.
         
         Toàn bộ nội dung trả về viết dưới dạng JSON có cấu trúc chính xác theo schema bên dưới và dịch thuật tiếng Việt chuẩn chỉnh, tự nhiên, chuyên sâu.
       `;
 
       let contents: any[] = [{ text: baseInstruction }];
 
-      // Attach base64 image if user uploaded one to provide product context (Multimodal input)
-      if (productBase64Image) {
+      // Attach base64 images if user uploaded multiple views
+      if (productBase64Images && Array.isArray(productBase64Images) && productBase64Images.length > 0) {
+        productBase64Images.forEach((base64) => {
+          if (base64) {
+            const cleanedImage = base64.replace(/^data:image\/\w+;base64,/, "");
+            contents.push({
+              inlineData: {
+                mimeType: "image/png",
+                data: cleanedImage,
+              },
+            });
+          }
+        });
+      } else if (productBase64Image) {
         // Strip data prefix if any
         const cleanedImage = productBase64Image.replace(/^data:image\/\w+;base64,/, "");
         contents.push({
@@ -401,7 +419,7 @@ app.use(express.json({ limit: "15mb" }));
         5. stepsDetail: Các bước: Các hành động cụ thể hoặc cách tiếp cận để người dùng tương tác chuyển đổi.
         6. uspDetail: USP: Thể hiện rõ mô hình (Lợi ích khách hàng -> Thông số kỹ thuật cụ thể của sản phẩm).
         7. headlineSubheadline: Headline - Subheadline: Sáng tạo một tiêu đề giật gân (Headline) đi liền với phụ đề (Subheadline) lôi cuốn để hiển thị chữ trên ảnh.
-        8. visualKey: Minh họa hình ảnh (Visual Key): Gợi ý phân cảnh chụp/vẽ hoặc bối cảnh hình ảnh trực quan thể hiện giá trị sản phẩm tốt nhất.
+        8. visualKey: Minh họa hình ảnh (Visual Key) hướng tới CÔNG DỤNG thực tế chính xác của sản phẩm. Hãy mô tả một cách cực kỳ chi tiết, dễ hiểu, sinh động và rõ bối cảnh để các AI tạo hình ảnh (như Midjourney, Stable Diffusion, DALL-E hay Imagen) dễ dàng lĩnh hội được hành động, bối cảnh, vật thể và tạo được hình ảnh minh họa sống động từ phần mô tả đó.
       `;
 
       const response = await generateContentWithFallback({
@@ -423,7 +441,10 @@ app.use(express.json({ limit: "15mb" }));
                   stepsDetail: { type: Type.STRING },
                   uspDetail: { type: Type.STRING },
                   headlineSubheadline: { type: Type.STRING },
-                  visualKey: { type: Type.STRING },
+                  visualKey: { 
+                    type: Type.STRING, 
+                    description: "Mô tả hình ảnh trực quan sinh động hướng tới CÔNG DỤNG thực tế của sản phẩm một cách dễ hiểu để AI tạo ảnh vẽ được bối cảnh chân thực từ đó" 
+                  },
                 },
                 required: ["stt", "step", "psychologicalGoal", "painPointAndDesire", "stepsDetail", "uspDetail", "headlineSubheadline", "visualKey"]
               }
@@ -503,7 +524,7 @@ app.use(express.json({ limit: "15mb" }));
     }
   });
 
-  // API endpoint for generating a product concept image mock-up using gemini-2.5-flash-image
+  // API endpoint for generating a product concept image mock-up using high-quality paid model gemini-3.1-flash-image
   app.post("/api/generate-image", async (req, res) => {
     try {
       const { productName, productDescription } = req.body;
@@ -524,9 +545,10 @@ app.use(express.json({ limit: "15mb" }));
         config: {
           imageConfig: {
             aspectRatio: "1:1",
+            imageSize: "1K"
           },
         },
-        modelPreference: ["gemini-2.5-flash-image", "gemini-3.1-flash-image"],
+        modelPreference: ["gemini-3.1-flash-image", "gemini-3-pro-image", "gemini-2.5-flash-image"],
       });
 
       let base64Image = "";
@@ -548,6 +570,190 @@ app.use(express.json({ limit: "15mb" }));
     } catch (error: any) {
       console.error("Error generating image:", error);
       res.status(500).json({ error: error?.message || "Đã xảy ra lỗi khi tự động chuyển hướng thiết kế ảnh minh họa bằng AI." });
+    }
+  });
+
+  // API endpoint for generating a composite mockup of the 5 visual elements based on the product images
+  app.post("/api/generate-composite-image", async (req, res) => {
+    try {
+      const { productName, productImage, productImages, visualKeys } = req.body;
+      if (!productName || !visualKeys || !Array.isArray(visualKeys) || visualKeys.length === 0) {
+        return res.status(400).json({ error: "Thiếu thông tin sản phẩm hoặc mô tả 5 yếu tố để tạo ảnh." });
+      }
+
+      console.log(`[Gemini API] Request received to generate composite key image based on ${visualKeys.length} items`);
+      const client = getGeminiClient();
+
+      // build descriptive text of the 5 elements
+      const elementsText = visualKeys.map((vk: string, idx: number) => `Yếu tố ${idx + 1}: ${vk}`).join("\n");
+
+      const imagePrompt = `
+        Bạn là bậc thầy thiết kế quảng cáo thương mại và chuyên gia đồ họa hình ảnh sản phẩm xuất sắc nhất.
+        NHIỆM VỤ QUAN TRỌNG NHẤT: Tạo ra một hình ảnh quảng cáo thể hiện chính xác sản phẩm có thương hiệu "${productName}" ở trung tâm ảnh, được bao quanh bởi các hình ảnh chức năng mô tả công dụng thực tế của 5 yếu tố "Visual Key" bên dưới.
+
+        YÊU CẦU BẮT BUỘC VỀ SẢN PHẨM CHÍNH (QUAN TRỌNG SỐ 1):
+        - Giữ nguyên bản tuyệt đối 100% hình dạng kết cấu, chất liệu vỏ hộp/thân máy, chi tiết nhãn mác và màu sắc đặc trưng của sản phẩm chính từ những hình ảnh chụp đầu vào có sẵn. Tuyệt đối không thay đổi kiểu dáng gốc, không biến đổi logo và màu sắc của thương hiệu.
+        - Sản phẩm chính phải nằm ở vị trí tiêu điểm (Hero Product) trung tâm nổi bật, được chiếu sáng bằng ánh sáng studio (studio lighting) cao cấp chuyên nghiệp.
+
+        YÊU CẦU VỀ 5 BẢN VẼ MÔ TẢ CHỨC NĂNG (VISUAL KEY):
+        - Các yếu tố nhỏ hay các phân cảnh phụ đi kèm xung quanh tuyệt đối KHÔNG ĐƯỢC thiết kế dưới dạng hộp quà hay vỏ hộp 3D hư cấu, mà bắt buộc phải là các bức ảnh phân cảnh thực tế sử dụng (lifestyle/functional action scenes) mô tả sinh động hiệu quả/ứng dụng trực quan của 5 công năng sau:
+        ${elementsText}
+        - Mỗi phân cảnh phụ này mô tả trực diện bối cảnh thực tiễn mà sản phẩm phát huy tối đa công hiệu, giúp khách hàng thấu hiểu ngay giải pháp thực sự từ các góc nhìn khác nhau.
+
+        PHONG CÁCH MỸ THUẬT:
+        - Commercial product advertising photography. Bố cục ngăn nắp, sang trọng, màu sắc hài hòa và đồng nhất tuyệt đối với màu sắc chủ đạo của dòng sản phẩm gốc.
+        - Chi tiết hiển thị cực kỳ sắc nét, chuyên nghiệp, không có văn bản bị méo mó hay ký tự rác vô nghĩa.
+      `;
+
+      let contents: any[] = [];
+
+      // Add multiple angles of the product if uploaded
+      if (productImages && Array.isArray(productImages) && productImages.length > 0) {
+        productImages.forEach((img) => {
+          if (img) {
+            const cleanedImage = img.replace(/^data:image\/\w+;base64,/, "");
+            contents.push({
+              inlineData: {
+                mimeType: "image/png",
+                data: cleanedImage,
+              },
+            });
+          }
+        });
+      } else if (productImage) {
+        const cleanedImage = productImage.replace(/^data:image\/\w+;base64,/, "");
+        contents.push({
+          inlineData: {
+            mimeType: "image/png",
+            data: cleanedImage,
+          },
+        });
+      }
+
+      contents.push({ text: imagePrompt });
+
+      const response = await generateContentWithFallback({
+        contents: { parts: contents },
+        config: {
+          imageConfig: {
+            aspectRatio: "1:1",
+            imageSize: "1K"
+          },
+        },
+        modelPreference: ["gemini-3.1-flash-image", "gemini-3-pro-image", "gemini-2.5-flash-image"],
+      });
+
+      let base64Image = "";
+      const candidates = response.candidates;
+      if (candidates && candidates[0]?.content?.parts) {
+        for (const part of candidates[0].content.parts) {
+          if (part.inlineData) {
+            base64Image = `data:${part.inlineData.mimeType || "image/png"};base64,${part.inlineData.data}`;
+            break;
+          }
+        }
+      }
+
+      if (!base64Image) {
+        throw new Error("Mô hình AI vẽ ảnh chưa phản hồi dữ liệu nhị phân tương thích.");
+      }
+
+      res.json({ imageUrl: base64Image });
+    } catch (error: any) {
+      console.error("Error generating composite image:", error);
+      res.status(500).json({ error: error?.message || "Đã xảy ra lỗi khi tạo ảnh mô tả 5 yếu tố bằng AI." });
+    }
+  });
+
+  // API endpoint for generating a targeted, economical individual functional image for a specific USP row
+  app.post("/api/generate-individual-image", async (req, res) => {
+    try {
+      const { productName, productImage, productImages, visualKey, uspDetail, painPointAndDesire } = req.body;
+      if (!productName || !visualKey) {
+        return res.status(400).json({ error: "Thiếu thông tin tên sản phẩm hoặc mô tả Visual Key." });
+      }
+
+      console.log(`[Gemini API] Generating targeted individual USP image for visual: ${visualKey}`);
+      const client = getGeminiClient();
+
+      const imagePrompt = `
+        Bạn là bậc thầy đồ họa thương mại chuyên thiết kế ảnh quảng cáo ứng dụng thực tế cho dòng sản phẩm "${productName}".
+        
+        NHIỆM VỤ: Vẽ 1 bức ảnh chụp quảng cáo đơn lẻ tập trung mô tả CHỨC NĂNG VÀ HIỆU QUẢ THỰC TẾ của sản phẩm tương ứng với yếu tố Visual Key sau:
+        - Mô tả Visual Key: "${visualKey}"
+        ${uspDetail ? `- Chi tiết USP: "${uspDetail}"` : ""}
+        ${painPointAndDesire ? `- Nỗi đau giải quyết: "${painPointAndDesire}"` : ""}
+
+        YÊU CẦU QUAN TRỌNG VỀ SẢN PHẨM GỐC:
+        - Giữ nguyên bản tuyệt đối 100% hình dạng kết cấu, nhãn mác thương hiệu, logo và tông màu chủ đạo của sản phẩm có trong các bức ảnh chụp đính kèm.
+        - Sản phẩm thực tế chính là trung tâm hoặc xuất hiện tương tác trực tiếp trong bối cảnh sử dụng.
+        
+        YÊU CẦU VỀ BAO BÌ VÀ DỰNG HỘP (PACKAGING MOCKUP):
+        - Nếu phần mô tả hoặc ảnh chụp đính kèm có chứa hình dạng bao bì bản in phẳng (flat print design/layout hoặc vỏ hộp giấy), hãy khéo léo bọc (wrap/mockup) họa tiết in ấn đó lên một chiếc hộp 3D thực tế sang trọng nhất để mô phỏng hình ảnh vỏ hộp của sản phẩm một cách chuẩn chỉnh không tì vết.
+
+        YÊU CẦU MỸ THUẬT:
+        - Không vẽ các hộp quà hư cấu hay các ký hiệu rác. Hãy vẽ một bức ảnh Lifestyle bối cảnh tự nhiên cao cấp (chụp quảng cáo studio thương mại chuyên nghiệp).
+        - Màu sắc hài hòa bắt mắt, ánh sáng phản chiếu chân thực lên bề mặt sản phẩm và vỏ hộp. Không có chữ viết bị méo mộc hay biến dạng trên ảnh được tạo ra.
+      `;
+
+      let contents: any[] = [];
+
+      // Add all available angles of input images for maximum accuracy
+      if (productImages && Array.isArray(productImages) && productImages.length > 0) {
+        productImages.forEach((img) => {
+          if (img) {
+            const cleanedImage = img.replace(/^data:image\/\w+;base64,/, "");
+            contents.push({
+              inlineData: {
+                mimeType: "image/png",
+                data: cleanedImage,
+              },
+            });
+          }
+        });
+      } else if (productImage) {
+        const cleanedImage = productImage.replace(/^data:image\/\w+;base64,/, "");
+        contents.push({
+          inlineData: {
+            mimeType: "image/png",
+            data: cleanedImage,
+          },
+        });
+      }
+
+      contents.push({ text: imagePrompt });
+
+      // Using gemini-2.5-flash-image first as it is the most economical, fast, and cost-effective option
+      const response = await generateContentWithFallback({
+        contents: { parts: contents },
+        config: {
+          imageConfig: {
+            aspectRatio: "1:1",
+            imageSize: "1K"
+          },
+        },
+        modelPreference: ["gemini-2.5-flash-image", "gemini-3.1-flash-image", "gemini-3-pro-image"],
+      });
+
+      let base64Image = "";
+      const candidates = response.candidates;
+      if (candidates && candidates[0]?.content?.parts) {
+        for (const part of candidates[0].content.parts) {
+          if (part.inlineData) {
+            base64Image = `data:${part.inlineData.mimeType || "image/png"};base64,${part.inlineData.data}`;
+            break;
+          }
+        }
+      }
+
+      if (!base64Image) {
+        throw new Error("Không nhận được phản hồi hình ảnh hợp lệ từ mô hình tiết kiệm.");
+      }
+
+      res.json({ imageUrl: base64Image });
+    } catch (error: any) {
+      console.error("Error generating individual USP image:", error);
+      res.status(500).json({ error: error?.message || "Đã xảy ra lỗi khi tạo ảnh minh họa USP đơn lẻ bằng AI." });
     }
   });
 
