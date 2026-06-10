@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from "motion/react";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import ReactMarkdown from 'react-markdown';
 import {
   Sparkles,
   UploadCloud,
@@ -3622,7 +3623,7 @@ export default function App() {
                       </div>
                       <button 
                         onClick={(e) => {
-                          const fullCopy = masterFileState.reportState?.rows.map(r => r.postContent).filter(Boolean).join("\n\n") || "";
+                          const fullCopy = reportRows.map(r => r.postContent).filter(Boolean).join("\n\n") || "";
                           navigator.clipboard.writeText(fullCopy);
                           
                           const btn = e.currentTarget;
@@ -3642,10 +3643,10 @@ export default function App() {
                     </div>
                     
                     <div className="bg-white border border-sky-200/60 rounded-xl p-5 md:p-8 text-[14px] text-slate-800 leading-[1.8] font-medium space-y-5 shadow-sm whitespace-pre-wrap selection:bg-sky-100">
-                      {masterFileState.reportState?.rows.map((row, idx) => (
+                      {reportRows.map((row, idx) => (
                         <div key={idx} className="relative">
                           {row.postContent ? (
-                            <ReactMarkdown className="markdown-body text-slate-800">{row.postContent}</ReactMarkdown>
+                            <div className="markdown-body text-slate-800"><ReactMarkdown>{row.postContent}</ReactMarkdown></div>
                           ) : (
                             <span className="text-slate-400 italic">Đang chờ hệ thống AI hoàn thiện nội dung...</span>
                           )}
