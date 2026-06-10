@@ -41,6 +41,7 @@ export interface FinalMasterRow {
   uspDetail: string;
   headlineSubheadline: string;
   visualKey: string;
+  postContent?: string;
   imageUrl?: string;
   isGeneratingImage?: boolean;
 }

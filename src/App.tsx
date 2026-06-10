@@ -3608,7 +3608,53 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="pt-6 border-t border-slate-205 text-center text-[10px] text-slate-400 font-mono tracking-widest uppercase">
+                  {/* Bản hiển thị Post Content gộp nối liền mạch */}
+                  <div className="mt-8 bg-sky-50/50 border border-sky-100 rounded-xl p-6 shadow-xxs print:break-before-page">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                      <div>
+                        <h4 className="text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-sky-600" />
+                          KỊCH BẢN CHUYỂN ĐỔI XUYÊN SUỐT (FULL COPYWRITING)
+                        </h4>
+                        <p className="text-xs text-slate-550 mt-1.5 font-medium leading-relaxed max-w-2xl">
+                          Bản thảo hoàn chỉnh được hệ thống ghép nối liền mạch qua 5 bước Hành trình Khách hàng. Từ mở bài khai phá Insight đến câu chốt Sales thuyết phục.
+                        </p>
+                      </div>
+                      <button 
+                        onClick={(e) => {
+                          const fullCopy = masterFileState.reportState?.rows.map(r => r.postContent).filter(Boolean).join("\n\n") || "";
+                          navigator.clipboard.writeText(fullCopy);
+                          
+                          const btn = e.currentTarget;
+                          const originalText = btn.innerHTML;
+                          btn.innerHTML = "Đã sao chép ✓";
+                          btn.classList.add("bg-emerald-600", "text-white");
+                          setTimeout(() => {
+                            btn.innerHTML = originalText;
+                            btn.classList.remove("bg-emerald-600", "text-white");
+                          }, 2000);
+                        }}
+                        className="px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-bold text-[11px] uppercase tracking-wider rounded-lg shadow-sm flex items-center justify-center gap-1.5 transition whitespace-nowrap cursor-pointer print:hidden"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Sao chép toàn bài</span>
+                      </button>
+                    </div>
+                    
+                    <div className="bg-white border border-sky-200/60 rounded-xl p-5 md:p-8 text-[14px] text-slate-800 leading-[1.8] font-medium space-y-5 shadow-sm whitespace-pre-wrap selection:bg-sky-100">
+                      {masterFileState.reportState?.rows.map((row, idx) => (
+                        <div key={idx} className="relative">
+                          {row.postContent ? (
+                            <ReactMarkdown className="markdown-body text-slate-800">{row.postContent}</ReactMarkdown>
+                          ) : (
+                            <span className="text-slate-400 italic">Đang chờ hệ thống AI hoàn thiện nội dung...</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="pt-8 border-t border-slate-205 text-center text-[10px] text-slate-400 font-mono tracking-widest uppercase">
                     BÀN GIAO THƯƠNG HIỆU MARKETING - KIẾN TẠO NGÀY {new Date().toLocaleDateString("vi-VN")}
                   </div>
                 </div>

@@ -489,6 +489,11 @@ app.use(express.urlencoded({ limit: "100mb", extended: true }));
              + [Deal/CTA ngắn gọn]: VD: "Trải nghiệm ngay, quà liền tay", "Săn deal chuẩn Âu"
            - Subheadline (Làm rõ "vì sao nên tin"): Bắt buộc phải có lý do cụ thể (công nghệ, chứng nhận, con số, trải nghiệm) để bổ trợ Headline. Kết thúc bằng 1 CTA ngắn gọn hành động. Cấu trúc chuẩn: Headline cảm xúc -> Subheadline lý tính -> CTA hành động.
         8. visualKey: Minh họa hình ảnh (Visual Key) hướng tới bối cảnh CÔNG DỤNG đời thực của sản phẩm. Không mô tả lộn xộn, chỉ tập trung vào một khung cảnh chân thực, rõ ràng để AI sinh ảnh Midjourney/Stable Diffusion có thể vẽ chính xác.
+        9. postContent: Đoạn nội dung copywriting chi tiết, thực chiến cho phần này. Bạn phải viết sao cho người dùng có thể DỄ DÀNG COPY PASTE gộp nối tiếp postContent từ Bước 1 đến Bước 5 để tạo thành MỘT BÀI VIẾT PR / Kịch bản Landing Page xuyên suốt hoàn chỉnh:
+           - Ở Bước 1: Bắt buộc mở đầu bằng 1-2 câu "Lời Mở Đầu / Hook" bắt từ insight đời sống, sau đó trình bày vấn đề.
+           - Ở Bước 2, 3, 4: Bắt buộc mở đầu đoạn bằng "Câu nối, từ nối chuyển ý" (Ví dụ: "Không chỉ vậy...", "Chưa dừng lại ở đó...", "Một điều nữa khiến...", "Nhưng điều quan trọng nhất là...") tạo sự liên kết logic mượt mà liền mạch với đoạn trên.
+           - Ở Bước 5: Viết đoạn kết luận tự nhiên và một lời chốt sales (Call to action) rành rọt, thuyết phục đóng lại bài.
+           - Giọng văn: Tuân thủ tuyệt đối quy tắc tại HIẾN PHÁP COPYWRITING (thực tế, sắc gọn, cảm xúc, phân tích Spec -> Benefit).
       `;
 
       const response = await generateContentWithFallback({
@@ -514,8 +519,12 @@ app.use(express.urlencoded({ limit: "100mb", extended: true }));
                     type: Type.STRING, 
                     description: "Mô tả hình ảnh trực quan sinh động hướng tới CÔNG DỤNG thực tế của sản phẩm một cách dễ hiểu để AI tạo ảnh vẽ được bối cảnh chân thực từ đó" 
                   },
+                  postContent: {
+                    type: Type.STRING,
+                    description: "Đoạn Copywriting hoàn chỉnh cho mục này. Bước 1 có Mở Bài. Bước 2, 3, 4 dùng câu nối để liên kết liền mạch với đoạn trước. Bước 5 có chốt CTA."
+                  }
                 },
-                required: ["stt", "step", "psychologicalGoal", "painPointAndDesire", "stepsDetail", "uspDetail", "headlineSubheadline", "visualKey"]
+                required: ["stt", "step", "psychologicalGoal", "painPointAndDesire", "stepsDetail", "uspDetail", "headlineSubheadline", "visualKey", "postContent"]
               }
             }
           }
