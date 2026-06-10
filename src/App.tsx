@@ -1737,11 +1737,12 @@ export default function App() {
             <FileSpreadsheet className="w-4 h-4" id="logo-icon" />
           </div>
           <div>
-            <h2 className="text-sm sm:text-base font-bold tracking-tight text-slate-800">
-              Master USP Builder <span className="text-blue-600 font-semibold text-xs sm:text-sm">v2.0</span>
+            <h2 className="text-sm sm:text-base font-black tracking-tight text-slate-900 flex items-center gap-1.5" id="header-profile-title">
+              <span>Thiết Kế Profile & Master USP</span>
+              <span className="bg-blue-50 text-blue-600 font-extrabold text-[9px] px-1.5 py-0.5 rounded-md border border-blue-200">v2.0</span>
             </h2>
-            <p className="text-[10px] sm:text-xs text-slate-500 hidden md:block leading-none">
-              Thiết lập bản cứng 5 bộ USP sát sườn chuẩn định vị thương hiệu
+            <p className="text-[10px] sm:text-xs text-slate-550 hidden md:block leading-none mt-0.5 font-medium">
+              Thiết lập bản cứng Profile sản phẩm và 5 bộ USP chuẩn định vị thương hiệu số hóa
             </p>
           </div>
         </div>

@@ -135,10 +135,27 @@ app.use(express.urlencoded({ limit: "100mb", extended: true }));
         return res.status(400).json({ error: "Vui lòng điền tên và mô tả sản phẩm." });
       }
 
+      let agentsMd = "";
+      let painPointMd = "";
+      try {
+        agentsMd = fs.readFileSync(path.join(process.cwd(), "AGENTS.md"), "utf-8");
+        painPointMd = fs.readFileSync(path.join(process.cwd(), "PAIN_POINT_ANALYSIS.md"), "utf-8");
+      } catch (err) {
+        console.warn("Could not read MD files", err);
+      }
+
       const client = getGeminiClient();
 
       const baseInstruction = `
-        Bạn là chuyên gia xuất sắc về Quản trị Trải nghiệm Khách hàng (CX) kiêm Giám đốc Nghiên cứu Thị trường kỳ cựu.
+        HIỂN PHÁP COPYWRITING VÀ ĐỊNH HÌNH VĂN PHONG:
+        ${agentsMd}
+
+        FRAMEWORK KỸ THUẬT PHÂN TÍCH NỖI ĐAU VÀ CHÂN DUNG KHÁCH HÀNG:
+        ${painPointMd}
+
+        ========================
+
+        Bạn là chuyên gia xuất sắc về Quản trị Trải nghiệm Khách hàng (CX) kiêm Giám đốc Chiến lược Thương hiệu.
         Sản phẩm cần phân tích: Tên: "${productName}" | Mô tả chi tiết, thông số và tính năng của sản phẩm: "${productDescription}"
 
         QUY TẮC PHÂN TÍCH QUAN TRỌNG:
@@ -317,9 +334,26 @@ app.use(express.urlencoded({ limit: "100mb", extended: true }));
         return res.status(400).json({ error: "Vui lòng cung cấp đầy đủ thông tin sản phẩm và chân dung khách hàng đã chọn." });
       }
 
+      let agentsMd = "";
+      let painPointMd = "";
+      try {
+        agentsMd = fs.readFileSync(path.join(process.cwd(), "AGENTS.md"), "utf-8");
+        painPointMd = fs.readFileSync(path.join(process.cwd(), "PAIN_POINT_ANALYSIS.md"), "utf-8");
+      } catch (err) {
+        console.warn("Could not read MD files", err);
+      }
+
       const client = getGeminiClient();
 
       const promptText = `
+        HIỂN PHÁP COPYWRITING VÀ ĐỊNH HÌNH VĂN PHONG:
+        ${agentsMd}
+
+        FRAMEWORK KỸ THUẬT PHÂN TÍCH NỖI ĐAU:
+        ${painPointMd}
+
+        ========================
+        
         Sản phẩm: "${productName}"
         Mô tả sản phẩm: "${productDescription}"
 
@@ -331,21 +365,25 @@ app.use(express.urlencoded({ limit: "100mb", extended: true }));
         - Châm ngôn: ${selectedPersona.summary}
 
         NHIỆM VỤ:
-        Từ thông tin chân dung khách hàng đặc thù trên kết hợp với tính năng của sản phẩm, hãy phân tích chuyên sâu nhằm đưa ra đúng 10 cặp "Nỗi đau khách hàng - Giải pháp USP tương ứng".
-        Mỗi cặp phải thể hiện một góc nhìn tâm lý thực tế, bóc tách dòng suy nghĩ cản trở họ và khắc phục triệt để bằng một lợi điểm bán hàng độc nhất (USP) thực thụ từ sản phẩm.
-        Ngôn ngữ cần thuyết phục, sắc bén, nhắm trúng tim đen người dùng và viết hoàn toàn bằng tiếng Việt.
+        Từ thông tin chân dung định vị và phân tích sâu sắc bằng FRAMEWORK PHÂN TÍCH NỖI ĐAU 7 BƯỚC ở trên:
+        Bước 1: Bắt nguồn từ 'vấn đề đời sống' của họ.
+        Bước 2: Tách thông số (Specs) -> Lợi ích Tính năng (Functional) -> Lợi ích Cảm xúc (Emotional).
+        Bước 3: Đưa ra 10 cặp "Nỗi đau khách hàng - Giải pháp USP tương ứng".
+
+        Yêu cầu văn bản: Thực tế, sắc gọn, không sáo rỗng. Bỏ qua các từ như "tuyệt vời", "hoàn hảo", "người bạn đồng hành". Dịch các thông số kỹ thuật thành bằng chứng bán hàng cụ thể theo đúng quy tắc ở HIẾN PHÁP COPYWRITING.
+
 
         Yêu cầu từng phần tử:
-        - painPoint: Nỗi đau cụ thể, sự băn khoăn hay sự bất tiện thực tế mà đối tượng gặp phải (nêu rõ ngữ cảnh bức xúc).
-        - usp: Lợi điểm bán hàng độc nhất / tính năng đặc hữu giúp xử lý dứt điểm nỗi lo/nỗi đau đó một cách vượt trội.
-        - description: Giải thích ngắn gọn cách thức sản phẩm mang lại giải pháp đó một cách tinh tế kèm một khẩu hiệu kêu gọi hoặc ví dụ trực quan.
+        - painPoint: Nỗi đau cụ thể, sự băn khoăn hay sự bất tiện thực tế mà đối tượng gặp phải (Ví dụ bối cảnh hằng ngày). Không hù dọa quá đà.
+        - usp: Lợi điểm bán hàng độc nhất (USP) sắc bén dùng bằng chứng cụ thể để xử lý nỗi đau.
+        - description: Giải thích cách mà Thông số kỹ thuật (Spec) -> Tính năng -> Mang lại lợi ích cảm xúc cho khách. Đi kèm một câu chốt (Key Message) mang tính định vị.
       `;
 
       const response = await generateContentWithFallback({
         contents: promptText,
         config: {
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-          systemInstruction: "Bạn là chuyên gia lập kế hoạch định vị thương hiệu và viết lời quảng cáo Copywriter đỉnh cao tại Việt Nam.",
+          systemInstruction: "Bạn là chuyên gia quy hoạch USP và Copywriter tiếp thị chuyển đổi. Viết văn phong thực tế, sắc bén, có số liệu hóa, đánh vào insight đời thực, tuyệt đối không dùng văn mẫu chung chung.",
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.ARRAY,
@@ -390,9 +428,26 @@ app.use(express.urlencoded({ limit: "100mb", extended: true }));
         return res.status(400).json({ error: "Yêu cầu đầy đủ tên sản phẩm, chân dung và chính xác 5 USP được chọn." });
       }
 
+      let agentsMd = "";
+      let painPointMd = "";
+      try {
+        agentsMd = fs.readFileSync(path.join(process.cwd(), "AGENTS.md"), "utf-8");
+        painPointMd = fs.readFileSync(path.join(process.cwd(), "PAIN_POINT_ANALYSIS.md"), "utf-8");
+      } catch (err) {
+        console.warn("Could not read MD files", err);
+      }
+
       const client = getGeminiClient();
 
       const promptText = `
+        HIỂN PHÁP COPYWRITING VÀ ĐỊNH HÌNH VĂN PHONG:
+        ${agentsMd}
+
+        FRAMEWORK KỸ THUẬT PHÂN TÍCH NỖI ĐAU:
+        ${painPointMd}
+
+        ========================
+
         Sản phẩm: "${productName}"
         Mô tả: "${productDescription}"
 
@@ -411,22 +466,36 @@ app.use(express.urlencoded({ limit: "100mb", extended: true }));
         `).join("\n")}
 
         NHIỆM VỤ:
-        Từ 5 cặp Nỗi đau & USP ban đầu này, hãy tinh luyện thành một bảng chiến lược định hình 5 giai đoạn hoặc kịch bản bước tiếp cận khách hàng xuất sắc. Hãy điền câu trả lời chi tiết bằng TIẾNG VIỆT vào cấu trúc JSON bên dưới. Hãy phân tích chuyên sâu sao cho:
+        Từ 5 cặp Nỗi đau & USP ban đầu này, hãy tinh luyện thành một bảng chiến lược định hình 5 giai đoạn nội dung theo phễu tiếp thị (Awareness -> Consideration -> Conversion -> Retention). Điền câu trả lời chi tiết bằng TIẾNG VIỆT vào cấu trúc JSON bên dưới.
+
+        YÊU CẦU MỞ RỘNG (Dựa trên Hiến pháp Copywriting):
+        - Không bán bằng cách nói sản phẩm "tốt". Bán bằng cách chứng minh sản phẩm giúp khách hàng sống nhẹ nhàng hơn.
+        - Tránh xa văn mẫu AI ("nâng tầm không gian sống", "người bạn đồng hành").
+        - Dùng số liệu như một bằng chứng. Dịch Thông số -> Tác động thực tế -> Lợi ích cảm xúc.
+
+        Chi tiết các cột:
         1. stt: Số thứ tự từ 1 đến 5.
-        2. step: Tên bước hành trình, ví dụ: "Bước 1: Tiếp cận & Săn đón sự tò mò", "Bước 2: Phá vỡ sự hoài nghi về chất lượng", vv.
-        3. psychologicalGoal: Mục Tiêu Tâm Lý sâu xa của người tiêu dùng trong giai đoạn mua hàng này.
-        4. painPointAndDesire: Bày tỏ rõ Nỗi Đau & Mong Muốn của họ bằng lời lẽ chân thực nhất.
-        5. stepsDetail: Các bước: Các hành động cụ thể hoặc cách tiếp cận để người dùng tương tác chuyển đổi.
-        6. uspDetail: USP: Thể hiện rõ mô hình (Lợi ích khách hàng -> Thông số kỹ thuật cụ thể của sản phẩm).
-        7. headlineSubheadline: Headline - Subheadline: Sáng tạo một tiêu đề giật gân (Headline) đi liền với phụ đề (Subheadline) lôi cuốn để hiển thị chữ trên ảnh.
-        8. visualKey: Minh họa hình ảnh (Visual Key) hướng tới CÔNG DỤNG thực tế chính xác của sản phẩm. Hãy mô tả một cách cực kỳ chi tiết, dễ hiểu, sinh động và rõ bối cảnh để các AI tạo hình ảnh (như Midjourney, Stable Diffusion, DALL-E hay Imagen) dễ dàng lĩnh hội được hành động, bối cảnh, vật thể và tạo được hình ảnh minh họa sống động từ phần mô tả đó.
+        2. step: Tên bước theo phễu (VD: "Bước 1: Awareness - Gọi tên vấn đề", "Bước 3: Conversion - Thúc đẩy hành động").
+        3. psychologicalGoal: Mục Tiêu Tâm Lý sâu xa (Phá vỡ niềm tin cũ, giải quyết rào cản giá, v.v).
+        4. painPointAndDesire: Bày tỏ rõ Nỗi Đau & Mong Muốn bằng lời lẽ chân thực nhất.
+        5. stepsDetail: Content Angle (Góc tiếp cận nội dung), ví dụ "An toàn không chỉ có inox". Trả lời câu hỏi: Sau khi đọc, khách hàng nên làm gì ngay? (CTA).
+        6. uspDetail: USP: Thể hiện rõ mô hình (Thông số kỹ thuật -> Lợi ích chức năng -> Lợi ích cảm xúc).
+        7. headlineSubheadline: Yêu cầu định dạng: Bắt buộc tách rõ "Headline: [Nội dung]" và "Subheadline: [Nội dung]".
+           - Headline (TỪ 6-12 TỪ, có lực, 1 điểm neo rõ ràng). Chọn 1 trong 5 mô hình:
+             + [Pain Point trực diện]: VD: "An toàn không chỉ có inox", "Đừng để chiếc chảo làm khó bữa ăn"
+             + [Lợi ích rõ ràng]: VD: "Ít dầu hơn, bếp sạch hơn", "Lau một lần, sạch lòng chảo"
+             + [Chuyển đổi nhận thức]: VD: "Đã đến lúc hiểu đúng về ceramic", "Không phải chống dính nào cũng giống nhau"
+             + [Cảm xúc gia đình]: VD: "Bữa ăn an toàn bắt đầu từ căn bếp", "Để mỗi bữa cơm nhẹ nhàng hơn"
+             + [Deal/CTA ngắn gọn]: VD: "Trải nghiệm ngay, quà liền tay", "Săn deal chuẩn Âu"
+           - Subheadline (Làm rõ "vì sao nên tin"): Bắt buộc phải có lý do cụ thể (công nghệ, chứng nhận, con số, trải nghiệm) để bổ trợ Headline. Kết thúc bằng 1 CTA ngắn gọn hành động. Cấu trúc chuẩn: Headline cảm xúc -> Subheadline lý tính -> CTA hành động.
+        8. visualKey: Minh họa hình ảnh (Visual Key) hướng tới bối cảnh CÔNG DỤNG đời thực của sản phẩm. Không mô tả lộn xộn, chỉ tập trung vào một khung cảnh chân thực, rõ ràng để AI sinh ảnh Midjourney/Stable Diffusion có thể vẽ chính xác.
       `;
 
       const response = await generateContentWithFallback({
           contents: promptText,
           config: {
             thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-            systemInstruction: "Bạn là giám đốc chiến lược hình ảnh thương hiệu và Copywriter bậc thầy tại Việt Nam. Trả lời chi tiết, chuyên nghiệp và có chiều sâu.",
+            systemInstruction: "Bạn là Giám đốc Chiến lược Thương hiệu và Copywriter Conversion-marketing đỉnh cao. Viết cực gọn, đánh trúng tâm lý, thiết lập headline 6-12 từ mạnh mẽ, tuyệt đối tuân thủ ngôn ngữ tiếp thị sắc bén.",
             responseMimeType: "application/json",
             responseSchema: {
               type: Type.ARRAY,
@@ -532,9 +601,20 @@ app.use(express.urlencoded({ limit: "100mb", extended: true }));
         return res.status(400).json({ error: "Vui lòng nhập tên và mô tả sản phẩm để thiết kế ảnh mô phỏng." });
       }
 
+      let agentsMd = "";
+      try {
+        agentsMd = fs.readFileSync(path.join(process.cwd(), "AGENTS.md"), "utf-8");
+      } catch (err) {
+        console.warn("Could not read MD files", err);
+      }
+
       const client = getGeminiClient();
 
       const imagePrompt = `
+        HIẾN PHÁP QUY CHUẨN ĐẦU RA HÌNH ẢNH:
+        ${agentsMd}
+        
+        ========================================
         Generate a professional, high-quality, product-oriented e-commerce advertising concept vector/illustration showcasing the product "${productName}". 
         Description context: "${productDescription}".
         Style: clean, hyper-modern, minimalist, elegant lighting, studio background, perfect color palette matching the product vibe. Underlined by professional commercial design principles. No messy texts or watermarks inside.
@@ -581,6 +661,13 @@ app.use(express.urlencoded({ limit: "100mb", extended: true }));
         return res.status(400).json({ error: "Thiếu thông tin sản phẩm hoặc mô tả 5 yếu tố để tạo ảnh." });
       }
 
+      let agentsMd = "";
+      try {
+        agentsMd = fs.readFileSync(path.join(process.cwd(), "AGENTS.md"), "utf-8");
+      } catch (err) {
+        console.warn("Could not read MD files", err);
+      }
+
       console.log(`[Gemini API] Request received to generate composite key image based on ${visualKeys.length} items`);
       const client = getGeminiClient();
 
@@ -588,6 +675,10 @@ app.use(express.urlencoded({ limit: "100mb", extended: true }));
       const elementsText = visualKeys.map((vk: string, idx: number) => `Yếu tố ${idx + 1}: ${vk}`).join("\n");
 
       const imagePrompt = `
+        HIẾN PHÁP QUY CHUẨN ĐẦU RA HÌNH ẢNH:
+        ${agentsMd}
+        
+        ========================================
         Bạn là bậc thầy thiết kế quảng cáo thương mại và chuyên gia đồ họa hình ảnh sản phẩm xuất sắc nhất.
         NHIỆM VỤ QUAN TRỌNG NHẤT: Tạo ra một hình ảnh quảng cáo thể hiện chính xác sản phẩm có thương hiệu "${productName}" ở trung tâm ảnh, được bao quanh bởi các hình ảnh chức năng mô tả công dụng thực tế của 5 yếu tố "Visual Key" bên dưới.
 
@@ -673,10 +764,21 @@ app.use(express.urlencoded({ limit: "100mb", extended: true }));
         return res.status(400).json({ error: "Thiếu thông tin tên sản phẩm hoặc mô tả Visual Key." });
       }
 
+      let agentsMd = "";
+      try {
+        agentsMd = fs.readFileSync(path.join(process.cwd(), "AGENTS.md"), "utf-8");
+      } catch (err) {
+        console.warn("Could not read MD files", err);
+      }
+
       console.log(`[Gemini API] Generating targeted individual USP image for visual: ${visualKey}`);
       const client = getGeminiClient();
 
       const imagePrompt = `
+        HIẾN PHÁP QUY CHUẨN ĐẦU RA HÌNH ẢNH:
+        ${agentsMd}
+        
+        ========================================
         Bạn là bậc thầy đồ họa thương mại chuyên thiết kế ảnh quảng cáo ứng dụng thực tế cho dòng sản phẩm "${productName}".
         
         NHIỆM VỤ: Vẽ 1 bức ảnh chụp quảng cáo đơn lẻ tập trung mô tả CHỨC NĂNG VÀ HIỆU QUẢ THỰC TẾ của sản phẩm tương ứng với yếu tố Visual Key sau:
